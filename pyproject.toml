@@ -1,0 +1,53 @@
+[build-system]
+build-backend = "setuptools.build_meta"
+requires = [
+    "docopt==0.6.2",
+    "matplotlib~=3.10.7",
+    "robotframework~=7.3",
+    "setuptools~=80.9",
+]
+
+[project]
+authors = [
+    { name="Edin Tarić", email="unicorn@regrow.earth" },
+]
+dependencies = [
+    "docopt==0.6.2",
+    "matplotlib~=3.10.7",
+    "robotframework~=7.3",
+]
+dynamic = [ "version" ]
+description = "Execute Robot Framework suites in parallel"
+keywords = [ "robot", "parallel", "robotframework", "async", "test", "runner" ]
+license = "Apache-2.0"
+name = "Medusa"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+# Install with `pip3 install -e '.[dev]'
+dev = [
+    "mypy",  # Static type checker
+    "pytest",  # Unit tests
+    "ruff",  # Python linter and formatter
+    "robotframework-robocop~=6.8",  # Robot linter and formatter
+]
+
+[project.urls]
+Repository = "https://github.com/insys-icom/medusa"
+
+[project.scripts]
+medusa = "medusa:main"
+
+[tool.pytest]
+addopts = ["--import-mode=importlib"]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 79
+
+[tool.ruff.lint]
+extend-select = [ "I" ]  # import sorting
+
+[tool.setuptools.dynamic]
+version = { attr = "medusa.__version__" }
