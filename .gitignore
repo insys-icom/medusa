@@ -1,0 +1,22 @@
+# Python files
+__pycache__
+.venv
+
+# Python tools
+uv.lock
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist
+build
+
+# Editor files
+.vscode
+
+# Robot results
+log.html
+report.html
+output.xml
+
+# Medusa results
+results
