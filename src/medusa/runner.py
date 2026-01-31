@@ -6,7 +6,7 @@ import os
 import signal
 import sys
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Self
 
 from .data import Data, Stage, Status
 from .robot import run_suite
@@ -36,9 +36,10 @@ class _SignalMonitor:
                 + " Further signals will be sent directly to running robot processes."
             )
 
-    def __enter__(self):
+    def __enter__(self) -> Self:
         signal.signal(signal.Signals.SIGINT, self)
         signal.signal(signal.Signals.SIGTERM, self)
+        return self
 
     def __exit__(self, *exc_info):
         signal.signal(signal.Signals.SIGINT, signal.SIG_DFL)

@@ -29,7 +29,7 @@ class MockRobotHandler(RobotHandlerInterface):
     """
 
     def __init__(self) -> None:
-        self.metadata: dict[str, str] = dict()
+        self.metadata: dict[str, str] = {}
 
     def set_variables(self, varmap: dict[str, Any]) -> None:
         assert False, "Not implemented"
@@ -159,14 +159,9 @@ def test__get_deps_dynamic_negative(input: str) -> None:
     suite_reader = RobotSuiteReader(mock_handler)
     mock_handler.metadata["medusa:deps"] = input
 
-    # Act
-    try:
+    # Act, Assert
+    with pytest.raises(Exception):
         static, dynamic = suite_reader._get_deps(MOCK_SUITE)
-    except Exception:
-        return  # Failed as expected
-
-    # Assert
-    assert False, "No exception was raised!"
 
 
 @pytest.mark.parametrize(

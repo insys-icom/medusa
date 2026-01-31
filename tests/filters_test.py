@@ -13,7 +13,7 @@ def static_suite() -> Suite:
         source=Path("foo.robot"),
         stage="Test",
         deps_static=frozenset(["one", "two", "three"]),
-        deps_dynamic=dict(),
+        deps_dynamic={},
         timeout=None,
         for_vars=None,
     )
@@ -73,7 +73,7 @@ def test_filter_static(
     static_suite: Suite, input: list[str], expected: bool
 ) -> None:
     flt = Filters(input)  # Arrange
-    output = flt.match(static_suite)  # Act
+    output = flt.match_and_narrow(static_suite)  # Act
     assert output == expected  # Assert
 
 
@@ -114,5 +114,5 @@ def test_filter_dynamic(
     dynamic_suite: Suite, input: list[str], expected: bool
 ) -> None:
     flt = Filters(input)  # Arrange
-    output = flt.match(dynamic_suite)  # Act
+    output = flt.match_and_narrow(dynamic_suite)  # Act
     assert output == expected  # Assert

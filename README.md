@@ -6,9 +6,9 @@ If you have a lot of Robot Framework tests that take a non-negligible amount of 
 
 This could be used to execute one or multiple suites against multiple target devices or endpoints simultaneously, or even to execute a single suite sequentially multiple times with different configuration.
 
-Parallelization happens on suite level, it is not (currently) possible to run tests within a single suite in parallel. It is also not (currently) possible to have one suite directly depend on another suite to finish first, though you could use separate stages to acheive this. Consider using [pabot](https://pabot.org/) if you need these features.
+Parallelization happens on suite level, it is not (currently) possible to run tests within a single suite in parallel. It is also not (currently) possible to have one suite directly depend on another suite to finish first, though you could use separate stages to achieve this. Consider using [pabot](https://pabot.org/) if you need these features.
 
-Medusa is developed by [INSYS icom GmbH](https://insys-icom.com) and licensed as Open Source Software under the Apache 2.0 license. See [LICENSE](./LICENSE) for the full license text. The official repository is [https://github.com/insys-icom/medusa](https://github.com/insys-icom/medusa).
+Medusa is developed by [INSYS icom GmbH](https://insys-icom.com) and licensed as Open Source Software, see the [License](#license) section below for details.
 
 
 # Table of Contents
@@ -16,6 +16,7 @@ Medusa is developed by [INSYS icom GmbH](https://insys-icom.com) and licensed as
 1. [Installation](#installation)
     1. [User](#user)
     1. [Developer](#developer)
+1. [Quick Start](#quick-start)
 1. [Command line usage](#command-line-usage)
 1. [Suite metadata](#suite-metadata)
 1. [Contributing](#contributing)
@@ -53,6 +54,36 @@ make test              # Run tests
 deactivate             # Exit the venv (when you are done)
 ```
 
+
+# Quick Start
+Add at least the required metadata `medusa:stage` and `medusa:deps` to your suite(s). Optionally add `medusa:timeout` for suite-specific timeouts or `medusa:for` for multiplying suites with different variables.
+
+``` robot
+*** Settings ***
+Documentation    Stage 1, multiply suite with three different dependencies and
+...              input values, timeout 5min (soft), 30s (hard), 5s (kill)
+...              First suite:  $DEP=foo    $INPUT=input1
+...              Second suite: $DEP=bar    $INPUT=input2
+...              Third suite:  $DEP=baz    $INPUT=input3
+Metadata    medusa:stage      1
+Metadata    medusa:deps       ${DEP}
+Metadata    medusa:for        ${DEP}    ${INPUT}    IN    &{DEP_INPUT_DICT}
+Metadata    medusa:timeout    300,30,5
+
+*** Variables ***
+${DEP}               ${None}  # Set by medusa:for
+${INPUT}             ${None}  # Set by medusa:for
+&{DEP_INPUT_DICT}    foo=input1    bar=input2    baz=input3
+```
+
+Usage summary:
+* `medusa stats`: View information about your suite(s)
+* `medusa run`: Run the suite(s)
+* Use robot options with `--` as a separator after medusa options: `medusa run -- -i security my_suite.robot`
+
+Results are stored in the `results/` directory in a date/timestamped subdirectory by default, this can be changed with the `-d` option. See `medusa -h` and the detailed documentation below for more information.
+
+
 # Command line usage
 Run `medusa --help` for full usage information, this section is just a rough overview. Medusa supports two main actions, `stats` and `run`. You can use `help` to get additional info about some options and `version` to output medusa's version.
 
@@ -63,7 +94,7 @@ medusa stats single_suite.robot my_suite_dir/
 
 You can also use (almost) all options that `robot` accepts. You need to write `--` before any `robot` options in order to separate them from Medusa's own options. In this example, we use `robot`'s `--dryrun` option:
 ``` sh
-#                     Sepataror ──┲┓
+#                     Separator ──┲┓
 medusa run --outputdir customdir/ -- --dryrun my_suite_dir/
 #          ┗━━ Medusa Option ━━━┛    ┗━━━ Robot Option ━━━┛
 ```

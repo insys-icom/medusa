@@ -71,10 +71,6 @@ def _print_suites(data: Data) -> None:
     for stage in sorted(data.stages.values(), key=lambda s: s.name):
         print("Stage", stage.name)
         for suite in sorted(stage.suites, key=lambda s: s.full_name):
-            # print(f"  {suite.source.absolute().relative_to(Path().absolute())}")
-            # if suite.for_vars:
-            #     for name, value in suite.for_vars.items():
-            #         print(f"    {name}: {value}")
             path = str(suite.source.resolve().relative_to(Path().resolve()))
 
             if suite.for_vars:
@@ -164,7 +160,7 @@ def _print_title(title: str) -> None:
     title_len = len(title)
     fillers = total - title_len - 2
 
-    before = fillers / 2
-    after = fillers / 2 if title_len % 2 == 0 else fillers / 2 + 1
+    before = fillers // 2
+    after = fillers // 2 if title_len % 2 == 0 else fillers // 2 + 1
 
-    print(int(before) * "=", title, int(after) * "=")
+    print(before * "=", title, after * "=")
