@@ -3,7 +3,7 @@ from collections import Counter
 from enum import Enum, auto
 from itertools import chain
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .errors import MetadataError
 from .utils import Stats, Timeout, Timer
@@ -18,7 +18,7 @@ class Status(Enum):
 class DynDep:
     def __init__(self, options: set[str]) -> None:
         self.options = options
-        self._value: Optional[str] = None
+        self._value: str | None = None
 
     @property
     def value(self) -> str:
@@ -105,7 +105,7 @@ class Suite(Stats, Timer):
             {dyn.value for dyn in self.deps_dynamic.values()}
         )
 
-    def try_assign_deps(self, available_deps: set[str]) -> Optional[set[str]]:
+    def try_assign_deps(self, available_deps: set[str]) -> set[str] | None:
         assignments = self.get_deps_assignment(available_deps)
         if assignments is None:
             return None
@@ -116,8 +116,8 @@ class Suite(Stats, Timer):
         return self.deps
 
     def get_deps_assignment(
-        self, available_deps: Optional[set[str]] = None
-    ) -> Optional[dict[str, str]]:
+        self, available_deps: set[str] | None = None
+    ) -> dict[str, str] | None:
         """Attempt to find a distinct dependency to each DynDep using Kuhn's
         Algorithm. Only options from available_deps are considered. If
         available_deps is None, all options are considered.
@@ -127,7 +127,7 @@ class Suite(Stats, Timer):
         """
         if available_deps is None:
             if not self.deps_dynamic:
-                return dict()
+                return {}
 
             # All given options are allowed
             options = {
@@ -136,7 +136,7 @@ class Suite(Stats, Timer):
         else:
             if not self.deps_dynamic:
                 if self.deps_static.issubset(available_deps):
-                    return dict()
+                    return {}
                 else:
                     return None
 

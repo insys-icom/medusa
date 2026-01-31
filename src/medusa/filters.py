@@ -83,18 +83,15 @@ class Filters:
                     self._mode = flt.op
                 else:
                     if flt.op != self._mode:
-                        MedusaError(
+                        raise MedusaError(
                             "The deps filter operators '=' and '~' can't be mixed!"
                         )
                 self._deps_excl |= flt.excl
                 self._deps_incl |= flt.incl
 
-    def match(self, s: Suite) -> bool:
+    def match_and_narrow(self, s: Suite) -> bool:
         """Checks whether the suite is allowed to run based on the filter rules
-        and adjusts dynamic deps if necessary
-
-        If dynamic dependencies are used in the suite, their options will be
-        narrowed down to match the filter criteria.
+        and narrows dynamic deps if necessary to match the filter criteria.
 
         Returns True if the Suite is allowed by the filter, else False.
         """

@@ -1,9 +1,6 @@
 [build-system]
 build-backend = "setuptools.build_meta"
 requires = [
-    "docopt==0.6.2",
-    "matplotlib~=3.10.7",
-    "robotframework~=7.3",
     "setuptools~=80.9",
 ]
 
@@ -20,7 +17,7 @@ dynamic = [ "version" ]
 description = "Execute Robot Framework suites in parallel"
 keywords = [ "robot", "parallel", "robotframework", "async", "test", "runner" ]
 license = "Apache-2.0"
-name = "Medusa"
+name = "robotframework-medusa"
 readme = "README.md"
 requires-python = ">=3.10"
 
@@ -37,7 +34,7 @@ dev = [
 Repository = "https://github.com/insys-icom/medusa"
 
 [project.scripts]
-medusa = "medusa:main"
+medusa = "medusa.main:main"
 
 [tool.pytest]
 addopts = ["--import-mode=importlib"]

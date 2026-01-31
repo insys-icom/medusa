@@ -33,7 +33,7 @@ def fetch_robot_data(settings: Settings) -> Data:
         args: list[str] = opts_args[1]
     except Information as e:
         # Catch `--help` and `--version` option output
-        exit(str(e))
+        sys.exit(str(e))
 
     # Collects suite data
     opts.setdefault("listener", list())  # Don't overwrite user opts
@@ -65,13 +65,13 @@ def fetch_robot_data(settings: Settings) -> Data:
         if stderr.tell() > 0:
             print("Robot Framework Errors:")
             print(stderr.getvalue())
-            exit(1)
+            sys.exit(1)
 
     if errors:
         print("Medusa Errors:")
         for error in errors:
             print(error)
-        exit(1)
+        sys.exit(1)
 
     return data
 
@@ -151,7 +151,7 @@ def run_suite(suite: Suite, settings: Settings):
         # like reassigning them because they are final, but it works so we need
         # to do it anyway.
         sys.__stdout__ = stdout  # type: ignore
-        sys.__stderr__ = stdout  # type: ignore
+        sys.__stderr__ = stderr  # type: ignore
         opts["stdout"] = stdout
         opts["stderr"] = stderr
         rf.execute(*args, **opts)
@@ -324,7 +324,7 @@ def _get_output_paths(path: Path) -> tuple[set[Path], bool]:
                 failed = True
         elif p.name == "output.xml":
             ret.add(p)
-            break
+            break  # Early stop, no need to seek more subdirs
 
     if not ret and not failed:
         failed = True

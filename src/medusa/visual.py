@@ -164,7 +164,7 @@ def _add_hover_effects(path_svg: Path, suites: list[Suite]) -> None:
     style = ET.SubElement(root, "style", attrib={"type": "text/css"})
     style.text = CSS
 
-    suite_elements: list[tuple[Suite, list[ET.Element]]] = list()
+    suite_elements: list[tuple[Suite, list[ET.Element]]] = []
 
     for s in suites:
         suite_elements.append(
@@ -194,7 +194,7 @@ def _add_hover_effects(path_svg: Path, suites: list[Suite]) -> None:
 
 def _get_sorted_deps(suites: list[Suite]) -> list[str]:
     """Returns list of dependencies sorted descending by time in use."""
-    durations: dict[str, timedelta] = dict()
+    durations: dict[str, timedelta] = {}
 
     for s in suites:
         for d in s.deps:

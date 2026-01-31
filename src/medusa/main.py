@@ -195,6 +195,7 @@ def add_file_logger(settings: Settings):
     log_file = settings.outputdir / "medusa.log"
 
     # We use the same formatter as the StreamHandler
+    assert len(LOGGER.handlers) > 0
     formatter = LOGGER.handlers[0].formatter
 
     # We write everything to file, log_level should only affect stdout output
