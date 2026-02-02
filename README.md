@@ -8,7 +8,7 @@ This could be used to execute one or multiple suites against multiple target dev
 
 Parallelization happens on suite level, it is not (currently) possible to run tests within a single suite in parallel. It is also not (currently) possible to have one suite directly depend on another suite to finish first, though you could use separate stages to achieve this. Consider using [pabot](https://pabot.org/) if you need these features.
 
-Medusa is developed by [INSYS icom GmbH](https://insys-icom.com) and licensed as Open Source Software, see the [License](#license) section below for details.
+Medusa is developed by [INSYS icom GmbH](https://insys-icom.com) and licensed as Open Source Software, see the [License](#license) section below for details. INSYS icom does not provide support for Medusa, see [Reporting Bugs](#reporting-bugs) if you found a problem.
 
 
 # Table of Contents
@@ -19,9 +19,8 @@ Medusa is developed by [INSYS icom GmbH](https://insys-icom.com) and licensed as
 1. [Quick Start](#quick-start)
 1. [Command line usage](#command-line-usage)
 1. [Suite metadata](#suite-metadata)
-1. [Contributing](#contributing)
-    1. [Reporting bugs](#reporting-bugs)
-    1. [Adding features](#adding-features)
+1. [Reporting bugs](#reporting-bugs)
+1. [Contributing features](#contributing-features)
 1. [License](#license)
 
 
@@ -30,9 +29,13 @@ Make sure you have installed python3 `pip` and `venv`.
 
 ## User
 ``` sh
-python3 -m venv .venv     # Create a venv in .venv (if not done already)
-. .venv/bin/activate      # Enter the venv
-python3 -m pip install .  # Install medusa
+python3 -m venv .venv  # Create a venv in .venv (if not done already)
+. .venv/bin/activate   # Enter the venv
+
+# Install medusa from PyPI.org
+python3 -m pip install robotframework-medusa
+# OR install it from source
+python3 -m pip install .
 
 # use medusa...
 
@@ -283,13 +286,11 @@ Do Something
 ```
 
 
-# Contributing
-INSYS icom does not provide support for Medusa.
-
-## Reporting bugs
+# Reporting bugs
 You can report bugs by opening an [issue](https://github.com/insys-icom/medusa/issues) in GitHub or sending an Email to [unicorn@regrow.earth](mailto:unicorn@regrow.earth).
 
-## Adding features
+
+# Contributing features
 If you want to contribute code to Medusa, you can either open a [pull request](https://github.com/insys-icom/medusa/pulls) or [send a patch via Email](https://git-send-email.io/) to [unicorn@regrow.earth](mailto:unicorn@regrow.earth).
 
 A few things to note:
