@@ -108,14 +108,41 @@ class RobotSuiteReader:
     def _get_deps(
         self, suite: running.TestSuite
     ) -> tuple[frozenset[str], dict[str, DynDep]]:
-        deps_str = self.robot_handler.get_metadata(suite, "medusa:deps", True)
-        assert isinstance(deps_str, str)
+        """Get static and dynamic dependencies from suite metadata.
+
+        First splits the metadata into individual arguments, tries to resolve
+        them as variables and then expands list variables into individual
+        values. The values are first attempted to be parsed as DynDeps and then
+        as static deps.
+
+        Returns tuple[static, dict[dyn_name, DynDep]]
+        """
+        deps_meta = self.robot_handler.get_metadata(suite, "medusa:deps", True)
+        assert isinstance(deps_meta, str)
 
         try:
+            deps_values: list[str] = []
+
+            for dep in self._split_args(deps_meta):
+                try:
+                    resolved = self.robot_handler.get_variable_value(dep)
+                except VariableError:
+                    # Not a single variable, but may contain variables
+                    resolved = dep
+
+                # Add list items if it's a list, else just add it as a str
+                if isinstance(resolved, Iterable) and not isinstance(
+                    resolved, str
+                ):
+                    for element in resolved:
+                        deps_values.append(str(element))
+                else:
+                    deps_values.append(str(resolved))
+
             deps_static: set[str] = set()
             deps_dynamic: dict[str, DynDep] = {}
 
-            for dep in self._split_args(deps_str):
+            for dep in deps_values:
                 if name_opts_tup := self._get_deps_dynamic(dep):
                     name, options = name_opts_tup
                     if name in deps_dynamic:
@@ -126,13 +153,7 @@ class RobotSuiteReader:
                     deps_dynamic[name] = DynDep(options)
                 else:
                     resolved = self.robot_handler.replace_variables(dep)
-                    if isinstance(resolved, Iterable) and not isinstance(
-                        resolved, str
-                    ):
-                        for idx, element in enumerate(resolved):
-                            deps_static.add(str(element))
-                    else:
-                        deps_static.add(str(resolved))
+                    deps_static.add(resolved)
 
             all_deps = set(deps_static).union(
                 opt for d in deps_dynamic.values() for opt in d.options
@@ -178,13 +199,17 @@ class RobotSuiteReader:
         if varname_val is Undefined:
             raise MetadataError(
                 "medusa:deps",
-                f"The target variable of a dynamic dependency needs to be defined with the value None but '{varname}' is undefined!",
+                f"The target variable of a dynamic dependency needs to be defined with a value but '{varname}' is undefined!",
             )
-        if varname_val is not None:
-            raise MetadataError(
-                "medusa:deps",
-                f"The target variable of a dynamic dependency needs to be defined with the value None but '{varname}' has value '{varname_val}'!",
-            )
+
+        # XXX(etaric): Can't force this to be None if we want to allow flexible
+        #              combinations with medusa:for where it overwrites its own
+        #              variable with the final value
+        # if varname_val is not None:
+        #     raise MetadataError(
+        #         "medusa:deps",
+        #         f"The target variable of a dynamic dependency needs to be defined with the value None but '{varname}' has value '{varname_val}'!",
+        #     )
 
         try:
             listname_val = self.robot_handler.get_variable_value(listname)
@@ -199,17 +224,26 @@ class RobotSuiteReader:
                 "medusa:deps",
                 f"The dynamic dependency options variable '{listname}' is undefined!",
             )
-        if not isinstance(listname_val, list):
+
+        try:
+            opts_iter = iter(listname_val)
+        except Exception:
             raise MetadataError(
                 "medusa:deps",
-                f"The dynamic dependency options variable '{listname}' is not a list!",
+                f"The dynamic dependency options variable '{listname}' is not iterable!",
             )
 
-        options = set(listname_val)
-        if not all(isinstance(opt, str) for opt in options):
+        if not all(isinstance(opt, str) for opt in opts_iter):
             raise MetadataError(
                 "medusa:deps",
                 f"The dynamic dependency options variable '{listname}' contains non-string values!",
+            )
+
+        options = set(listname_val)
+        if len(options) <= 0:
+            raise MetadataError(
+                "medusa:deps",
+                f"The dynamic dependency options variable '{listname}' is empty!",
             )
 
         return (varname, options)
@@ -322,4 +356,5 @@ class RobotSuiteReader:
         return maps
 
     def _split_args(self, args: str) -> list[str]:
-        return re.split(r" {2,}", args)
+        res = re.split(r" {2,}", args)
+        return res

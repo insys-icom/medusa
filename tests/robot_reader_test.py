@@ -4,6 +4,7 @@ from typing import Any
 import pytest
 from robot import running  # type: ignore
 
+from medusa.errors import VariableError
 from medusa.robot_handler import RobotHandlerInterface, Undefined
 from medusa.robot_reader import RobotSuiteReader
 from medusa.suite import DynDep
@@ -17,6 +18,8 @@ VARIABLES: dict[str, Any] = {
     "${list_var}": ["val1", "val2", "val3"],
     "${nested_list}": [["val1.1", "val1.2"], ["val2.1", "val2.2"]],
     "${dict_var}": {"val1.1": "val1.2", "val2.1": "val2.2"},
+    "${list_mixed}": ["val1", "ANY ${target1} IN ${list_var}", "val2"],
+    "${list_empty}": [],
     "${target1}": None,
     "${target2}": None,
 }
@@ -37,18 +40,21 @@ class MockRobotHandler(RobotHandlerInterface):
     def replace_variables(self, s: str) -> Any:
         try:
             val = self.get_variable_value(s)
+            print("TEST: var_whole_value:", val)
             return val
         except Exception:
             pass
 
         def replace_var(m: re.Match) -> Any:
             val = self.get_variable_value(m.group(0))
+            print("TEST: var_value:", val)
             assert val is not Undefined
-            return val
+            return str(val)
 
         return re.sub(r"\$\{[a-z0-9_]+\}", replace_var, s)
 
     def get_variable_value(self, name: str) -> Any:
+        print("getting value")
         if re.fullmatch(r"\$\{[a-z0-9_]+\}", name):
             if name in VARIABLES:
                 res = VARIABLES[name]
@@ -56,7 +62,9 @@ class MockRobotHandler(RobotHandlerInterface):
             else:
                 return Undefined
         else:
-            raise AssertionError("Not a valid variable name")
+            raise VariableError(
+                name, "MockRobotHandler: Not a valid variable name"
+            )
 
     def get_metadata(
         self, suite: running.TestSuite, name: str, required: bool
@@ -125,6 +133,11 @@ def test__get_stage(input: str, expected: str) -> None:
             ["one", "val"],
             {"${target1}": DynDep({"val1", "val2", "val3"})},
         ),
+        (
+            "${list_mixed}",
+            ["val1", "val2"],
+            {"${target1}": DynDep({"val1", "val2", "val3"})},
+        ),
     ],
 )
 def test__get_deps(
@@ -148,9 +161,12 @@ def test__get_deps(
     "input",
     [
         "ANY ${nonexistent} IN ${list_var}",  # Target has to exist
-        "ANY ${scalar} IN ${list_var}",  # Target has to have value None
+        # XXX(etaric): Disabled, we might want to overwrite medusa:for vars
+        # "ANY ${scalar} IN ${list_var}",  # Target has to have value None
         "ANY ${target1} IN ${nonexistent}",  # Source has to exist
-        "ANY ${target1} IN ${scalar}",  # Source has to be a list
+        # XXX(etaric): Disabled for more flexible iteration over types
+        # "ANY ${target1} IN ${scalar}",  # Source has to be a list
+        "ANY ${target1} IN ${list_empty}",  # List needs items
     ],
 )
 def test__get_deps_dynamic_negative(input: str) -> None:
@@ -162,6 +178,9 @@ def test__get_deps_dynamic_negative(input: str) -> None:
     # Act, Assert
     with pytest.raises(Exception):
         static, dynamic = suite_reader._get_deps(MOCK_SUITE)
+        print(static)
+        for k, v in dynamic.items():
+            print(f"{k}: {v.options}")
 
 
 @pytest.mark.parametrize(

@@ -105,18 +105,30 @@ class Suite(Stats, Timer):
             {dyn.value for dyn in self.deps_dynamic.values()}
         )
 
-    def try_assign_deps(self, available_deps: set[str]) -> set[str] | None:
-        assignments = self.get_deps_assignment(available_deps)
+    def try_assign_deps(
+        self, available_deps: set[str] | None = None
+    ) -> set[str] | None:
+        if available_deps is None:
+            available_deps = set(self.deps_static).union(
+                {d for d in self.deps_dynamic_cnt.keys()}
+            )
+
+        if not self.deps_static.issubset(available_deps):
+            return None
+
+        assignments = self._get_deps_assignment(
+            available_deps - self.deps_static
+        )
         if assignments is None:
             return None
 
-        for name, value in assignments.items():
-            self.deps_dynamic[name].value = value
+        for name, _get_deps_assignment in assignments.items():
+            self.deps_dynamic[name].value = _get_deps_assignment
 
         return self.deps
 
-    def get_deps_assignment(
-        self, available_deps: set[str] | None = None
+    def _get_deps_assignment(
+        self, available_deps: set[str]
     ) -> dict[str, str] | None:
         """Attempt to find a distinct dependency to each DynDep using Kuhn's
         Algorithm. Only options from available_deps are considered. If
@@ -125,28 +137,14 @@ class Suite(Stats, Timer):
         Returns a dict of name: chosen_option if every DynDep can be satisfied
         or None if no solution exists.
         """
-        if available_deps is None:
-            if not self.deps_dynamic:
-                return {}
+        if not self.deps_dynamic:
+            return {}
 
-            # All given options are allowed
-            options = {
-                name: dyn.options for name, dyn in self.deps_dynamic.items()
-            }
-        else:
-            if not self.deps_dynamic:
-                if self.deps_static.issubset(available_deps):
-                    return {}
-                else:
-                    return None
-
-            available_dyn = available_deps.difference(self.deps_static)
-
-            # Filter options by available_deps
-            options = {
-                name: dyn.options.intersection(available_dyn)
-                for name, dyn in self.deps_dynamic.items()
-            }
+        # Filter options by available_deps
+        options = {
+            name: dyn.options.intersection(available_deps)
+            for name, dyn in self.deps_dynamic.items()
+        }
 
         # Early exit if any DynDep has no available options after filtering
         if any(not opts for opts in options.values()):

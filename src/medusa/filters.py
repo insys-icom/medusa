@@ -110,6 +110,9 @@ class Filters:
 
             for d in s.deps_dynamic.values():
                 # Remove all excluded deps from DynDep options
+                s.subtract_dynamic_stats(
+                    d.options.intersection(self._deps_excl)
+                )
                 d.options.difference_update(self._deps_excl)
                 if not d.options:
                     return False  # No options left for a dynamic dep
@@ -122,12 +125,16 @@ class Filters:
 
                 for dyn in s.deps_dynamic.values():
                     # Remove all non-included deps from DynDep options
+                    s.subtract_dynamic_stats(
+                        dyn.options.difference(self._deps_incl)
+                    )
                     dyn.options.intersection_update(self._deps_incl)
+
                     if not dyn.options:
                         return False  # No options left for a dynamic dep
 
                 if s.deps_dynamic:
-                    if s.get_deps_assignment() is None:
+                    if s.try_assign_deps() is None:
                         # DynDeps are not solvable
                         return False
         else:

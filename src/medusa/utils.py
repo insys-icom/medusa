@@ -66,6 +66,12 @@ class Stats(ABC):
         self.deps_dynamic_cnt.update(s.deps_dynamic_cnt)
         self.tags.update(s.tags)
 
+    def subtract_dynamic_stats(self, names: set[str]) -> None:
+        self.deps_dynamic_cnt.subtract(names)
+        for name in names:
+            if self.deps_dynamic_cnt[name] <= 0:
+                del self.deps_dynamic_cnt[name]
+
 
 class Timer:
     """Keeps track of execution time. When given a name, it outputs start and
