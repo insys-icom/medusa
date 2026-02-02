@@ -42,6 +42,7 @@ def fetch_robot_data(settings: Settings) -> Data:
     # Deletes unnecessary empty suites and sets correct execution mode
     opts.setdefault("prerunmodifier", list())  # Don't overwrite user opts
     opts["prerunmodifier"].insert(0, SuitePrepModifier())
+    opts["prerunmodifier"].insert(0, SuitePrepDeleter())
 
     # If we have more than one base suite, they get added to an automatically
     # named parent suite. Here we manually set the parent suite name.
@@ -108,9 +109,9 @@ def run_suite(suite: Suite, settings: Settings):
 
     # Deletes unnecessary empty suites and sets correct execution mode. Also
     # writes suite metadata and appends suffix to suite name for `medusa:for`
-    metadata = _get_pretty_metadata(suite)
     opts.setdefault("prerunmodifier", list())
-    opts["prerunmodifier"].insert(0, SuitePrepModifier(metadata, suite.suffix))
+    opts["prerunmodifier"].insert(0, SuitePrepModifier(suite))
+    opts["prerunmodifier"].insert(0, SuitePrepDeleter())
 
     # If we have more than one base suite, they get added to an automatically
     # named parent suite. Here we manually set the parent suite name.
@@ -158,13 +159,16 @@ def run_suite(suite: Suite, settings: Settings):
 
 
 class SuitePrepModifier(SuiteVisitor):
-    def __init__(
-        self, metadata: dict[str, str] | None = None, suffix: str | None = None
-    ):
+    def __init__(self, target_suite: Suite | None = None):
         super().__init__()
+        self.suffix: str | None = None
+        self.metadata: dict[str, str] | None = None
+        self.source: Path | None = None
 
-        self.suffix = suffix
-        self.metadata = metadata
+        if target_suite:
+            self.suffix = target_suite.suffix
+            self.metadata = _get_pretty_metadata(target_suite)
+            self.source = target_suite.source.resolve()
 
     def start_suite(self, suite: running.TestSuite):
         # Edge case: If we execute a single medusa:for suite file, we end up
@@ -188,6 +192,17 @@ class SuitePrepModifier(SuiteVisitor):
                 **reset_dict,
             )
 
+        # Edge case: Under some circumstances, robot framework incorrectly
+        # includes other suites AND their tests when using --parseinclude.
+        # If a child suite has tests but the source is not the expected source,
+        # we remove it here.
+        if self.source and suite.suites:
+            suite.suites = [
+                s
+                for s in suite.suites
+                if not (s.tests and s.source.resolve() != self.source)
+            ]
+
         # If we use medusa:for, we need to give the target suite a unique name
         if suite.tests and self.suffix:
             suite.name += self.suffix
@@ -197,9 +212,21 @@ class SuitePrepModifier(SuiteVisitor):
             for key, value in self.metadata.items():
                 suite.metadata[key] = value
 
+    def visit_test(self, _):
+        pass
+
+    def visit_keyword(self, _):
+        pass
+
+
+class SuitePrepDeleter(SuiteVisitor):
+    """Deletes empty suites and sets the correct execution mode."""
+
+    def start_suite(self, suite: running.TestSuite):
         # Robot adds all the other suites that were specified as command line
         # arguments, even though we use `parseinclude` to only run a single
-        # suite. These other suites are left empty, so we remove them except
+        # suite. They are simply empty suites though (besides an edge case
+        # that is taken care of by SuitePrepModifier) so we remove them except
         # for the immediate children because they impact result merging.
         suite.remove_empty_suites(preserve_direct_children=True)
 
@@ -209,6 +236,9 @@ class SuitePrepModifier(SuiteVisitor):
         for s in suite.suites:
             if not s.has_tests:
                 s.rpa = False
+
+    def visit_test(self, _):
+        pass
 
     def visit_keyword(self, _):
         pass
