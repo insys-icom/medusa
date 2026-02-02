@@ -19,7 +19,7 @@ keywords = [ "robot", "parallel", "robotframework", "async", "test", "runner" ]
 license = "Apache-2.0"
 name = "robotframework-medusa"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 [project.optional-dependencies]
 # Install with `pip3 install -e '.[dev]'
