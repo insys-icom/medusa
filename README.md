@@ -25,6 +25,8 @@ Medusa is developed by [INSYS icom GmbH](https://insys-icom.com) and licensed as
 
 
 # Installation
+___NOTE: Medusa is currently only tested on Linux and does not work on Windows 11, see [#4](https://github.com/insys-icom/medusa/issues/4).___
+
 Make sure you have installed python3 `pip` and `venv`.
 
 ## User
