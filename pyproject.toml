@@ -8,6 +8,10 @@ requires = [
 authors = [
     { name="Edin Tarić", email="unicorn@regrow.earth" },
 ]
+classifiers = [
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+]
 dependencies = [
     "docopt==0.6.2",
     "matplotlib~=3.10.7",
