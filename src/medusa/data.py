@@ -1,15 +1,20 @@
-from .filters import Filters
-from .suite import Status, Suite
+from typing import TYPE_CHECKING
+
+from .suite import Status
 from .utils import Stats, Timer
+
+if TYPE_CHECKING:
+    from .filters import Filters
+    from .suite import Suite
 
 
 class Stage(Stats, Timer):
     def __init__(self, name: str) -> None:
         super().__init__(t_name=f"stage {name}")
         self.name = name
-        self.suites: list[Suite] = []
+        self.suites: "list[Suite]" = []
 
-    def insert(self, s: Suite):
+    def insert(self, s: "Suite"):
         self.add_stats(s)
         self.suites.append(s)
 
@@ -27,12 +32,12 @@ class Stage(Stats, Timer):
 
 
 class Data(Stats):
-    def __init__(self, filters: Filters) -> None:
+    def __init__(self, filters: "Filters") -> None:
         super().__init__()
         self.filters = filters
         self.stages: dict[str, Stage] = {}
 
-    def insert(self, s: Suite):
+    def insert(self, s: "Suite"):
         if self.filters.match_and_narrow(s):
             self.add_stats(s)
             self.stages.setdefault(s.stage, Stage(s.stage)).insert(s)

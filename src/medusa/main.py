@@ -1,20 +1,18 @@
 import logging
 import sys
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from docopt import docopt  # type: ignore
 
 from .constants import OUTPUTDIR, REPO_LINK, T_HARD, T_KILL
-from .data import Data
 from .errors import MedusaError
-from .filters import Filters
-from .robot import fetch_robot_data, merge_results
-from .runner import Runner
-from .settings import Settings
-from .stats import print_stats
-from .utils import LOGGER, Timeout
-from .version import __version__
-from .visual import write_visualization
+from .utils import LOGGER
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .data import Data
+    from .settings import Settings
 
 HELP = f"""Medusa: Run Robot Framework suites with depdendency-aware parallelization
 
@@ -128,8 +126,16 @@ def main() -> None:
             else:
                 print(HELP)
         elif arguments["version"]:
+            from .version import __version__
+
             print(__version__)
         else:
+            from pathlib import Path
+
+            from .filters import Filters
+            from .settings import Settings
+            from .utils import Timeout
+
             filters = Filters(arguments["--filter"])
             outputdir = Path(arguments["--outputdir"])
             robotargs = arguments["ROBOTARGS"]
@@ -147,8 +153,12 @@ def main() -> None:
         exit(1)
 
 
-def run(settings: Settings):
-    data: Data = fetch_robot_data(settings)
+def run(settings: "Settings"):
+    from .robot import fetch_robot_data, merge_results
+    from .runner import Runner
+    from .visual import write_visualization
+
+    data: "Data" = fetch_robot_data(settings)
 
     if data.n_tests <= 0:
         raise MedusaError("No tests found, nothing to run!")
@@ -168,8 +178,11 @@ def run(settings: Settings):
     print(f"Results: {format_path(settings.outputdir)}")
 
 
-def stats(settings: Settings, selection: str):
-    data: Data = fetch_robot_data(settings)
+def stats(settings: "Settings", selection: str):
+    from .robot import fetch_robot_data
+    from .stats import print_stats
+
+    data: "Data" = fetch_robot_data(settings)
     print_stats(data, selection)
 
 
@@ -191,7 +204,7 @@ def configure_logging(log_level: int):
     LOGGER.addHandler(stream_handler)
 
 
-def add_file_logger(settings: Settings):
+def add_file_logger(settings: "Settings"):
     log_file = settings.outputdir / "medusa.log"
 
     # We use the same formatter as the StreamHandler
@@ -206,7 +219,7 @@ def add_file_logger(settings: Settings):
     LOGGER.addHandler(file_handler)
 
 
-def format_path(path: Path) -> str:
+def format_path(path: "Path") -> str:
     """If stdout is a tty, the path is wrapped as a OSC 8 link to make
     terminals recognise it.
     """

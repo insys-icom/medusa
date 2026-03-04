@@ -3,26 +3,33 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from itertools import chain
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
-from robot import running
 from robot.api.interfaces import ListenerV3
 
 from .constants import META_RE
-from .data import Data
 from .errors import MedusaError, MetadataError, SuiteError, VariableError
-from .robot_handler import RobotHandler, RobotHandlerInterface, Undefined
+from .robot_handler import RobotHandler, Undefined
 from .suite import DynDep, Suite
 from .utils import Timeout
 
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+    from typing import Any
+
+    from robot import running
+
+    from .data import Data
+    from .robot_handler import RobotHandlerInterface
+
 
 class RobotSuiteWalker(ListenerV3):
-    def __init__(self, data: Data, errors: list[str]):
+    def __init__(self, data: "Data", errors: list[str]):
         self.data = data
         self.errors = errors
         self.reader = RobotSuiteReader()
 
-    def start_suite(self, suite: running.TestSuite, _):
+    def start_suite(self, suite: "running.TestSuite", _):
         if not suite.tests:
             return  # For now we only process leaf suites that contain tests
 
@@ -34,7 +41,12 @@ class RobotSuiteWalker(ListenerV3):
         except Exception as e:
             self.errors.append(str(SuiteError(str(suite.source), str(e))))
 
-    def start_invalid_keyword(self, keyword, implementation, __):
+    def start_invalid_keyword(
+        self,
+        keyword: "running.Keyword",
+        implementation: "running.KeywordImplementation",
+        __,
+    ):
         self.errors.append(
             str(
                 MedusaError(
@@ -46,21 +58,21 @@ class RobotSuiteWalker(ListenerV3):
 
 
 class RobotSuiteReader:
-    def __init__(self, robot_handler: RobotHandlerInterface | None = None):
+    def __init__(self, robot_handler: "RobotHandlerInterface|None" = None):
         if robot_handler:
             self.robot_handler = robot_handler
         else:
             self.robot_handler = RobotHandler()
 
-    def get_suites(self, suite: running.TestSuite) -> list[Suite]:
+    def get_suites(self, suite: "running.TestSuite") -> "list[Suite]":
         if var_maps := self._get_for(suite):
             return [self._get_suite(suite, var_map) for var_map in var_maps]
         else:
             return [self._get_suite(suite, None)]
 
     def _get_suite(
-        self, suite: running.TestSuite, varmap: dict[str, Any] | None = None
-    ) -> Suite:
+        self, suite: "running.TestSuite", varmap: "dict[str, Any]|None" = None
+    ) -> "Suite":
         if varmap:
             self.robot_handler.set_variables(varmap)
 
@@ -88,7 +100,7 @@ class RobotSuiteReader:
             n_tests=n_tests,
         )
 
-    def _get_stage(self, suite: running.TestSuite) -> str:
+    def _get_stage(self, suite: "running.TestSuite") -> str:
         stage = self.robot_handler.get_metadata(suite, "medusa:stage", True)
         assert isinstance(stage, str)
 
@@ -106,8 +118,8 @@ class RobotSuiteReader:
         return stage
 
     def _get_deps(
-        self, suite: running.TestSuite
-    ) -> tuple[frozenset[str], dict[str, DynDep]]:
+        self, suite: "running.TestSuite"
+    ) -> "tuple[frozenset[str], dict[str, DynDep]]":
         """Get static and dynamic dependencies from suite metadata.
 
         First splits the metadata into individual arguments, tries to resolve
@@ -140,7 +152,7 @@ class RobotSuiteReader:
                     deps_values.append(str(resolved))
 
             deps_static: set[str] = set()
-            deps_dynamic: dict[str, DynDep] = {}
+            deps_dynamic: "dict[str, DynDep]" = {}
 
             for dep in deps_values:
                 if name_opts_tup := self._get_deps_dynamic(dep):
@@ -248,7 +260,7 @@ class RobotSuiteReader:
 
         return (varname, options)
 
-    def _get_timeout(self, suite: running.TestSuite) -> Timeout | None:
+    def _get_timeout(self, suite: "running.TestSuite") -> "Timeout|None":
         try:
             timeout_str = self.robot_handler.get_metadata(
                 suite, "medusa:timeout", False
@@ -262,8 +274,8 @@ class RobotSuiteReader:
             raise MetadataError("medusa:timeout", str(e))
 
     def _get_for(
-        self, suite: running.TestSuite
-    ) -> list[dict[str, Any]] | None:
+        self, suite: "running.TestSuite"
+    ) -> "list[dict[str, Any]]|None":
         try:
             args_str = self.robot_handler.get_metadata(
                 suite, "medusa:for", False
@@ -321,8 +333,8 @@ class RobotSuiteReader:
             raise MetadataError("medusa:for", str(e))
 
     def _get_for_from_mapping(
-        self, vars: list[str], mapping: Mapping
-    ) -> list[dict[str, Any]]:
+        self, vars: list[str], mapping: "Mapping"
+    ) -> "list[dict[str, Any]]":
         if len(vars) != 2:
             raise MetadataError(
                 "medusa:for",
@@ -332,10 +344,10 @@ class RobotSuiteReader:
         return maps
 
     def _get_for_from_iterable(
-        self, vars: list[str], iterable: Any
-    ) -> list[dict[str, Any]]:
+        self, vars: list[str], iterable: "Any"
+    ) -> "list[dict[str, Any]]":
         """Raises MetadataError if the value is not iterable"""
-        maps: list[dict[str, Any]] = []
+        maps: "list[dict[str, Any]]" = []
 
         try:
             source_iter = iter(iterable)

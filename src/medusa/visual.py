@@ -1,18 +1,12 @@
-import xml.etree.ElementTree as ET
-from datetime import datetime, timedelta
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-import matplotlib.pyplot as plt
-from matplotlib.dates import (
-    MICROSECONDLY,
-    AutoDateLocator,
-    ConciseDateFormatter,
-)
+if TYPE_CHECKING:
+    from datetime import datetime
+    from pathlib import Path
 
-from .data import Data
-from .settings import Settings
-from .suite import Status, Suite
-from .utils import Timer
+    from .data import Data
+    from .settings import Settings
+    from .suite import Suite
 
 CSS = """
 svg {
@@ -39,7 +33,10 @@ Duration: {duration}
 """
 
 
-def write_visualization(settings: Settings, data: Data) -> None:
+def write_visualization(settings: "Settings", data: "Data") -> None:
+    from .suite import Status
+    from .utils import Timer
+
     t = Timer("writing visualization")
     t.timer_start()
 
@@ -52,7 +49,7 @@ def write_visualization(settings: Settings, data: Data) -> None:
     ]
 
     # Only consider stages that contain finished suites
-    stage_starts: list[tuple[datetime, str]] = sorted(
+    stage_starts: "list[tuple[datetime, str]]" = sorted(
         [(s.t_start, s.name) for s in data.stages.values() if s.finished > 0]
     )
 
@@ -63,10 +60,17 @@ def write_visualization(settings: Settings, data: Data) -> None:
 
 
 def _create_plot(
-    path_svg: Path,
-    suites: list[Suite],
-    stage_starts: list[tuple[datetime, str]],
+    path_svg: "Path",
+    suites: "list[Suite]",
+    stage_starts: "list[tuple[datetime, str]]",
 ) -> None:
+    import matplotlib.pyplot as plt
+    from matplotlib.dates import (
+        MICROSECONDLY,
+        AutoDateLocator,
+        ConciseDateFormatter,
+    )
+
     deps = _get_sorted_deps(suites)
 
     bar_count = len(deps)
@@ -143,7 +147,9 @@ def _create_plot(
     plt.savefig(path_svg, bbox_inches="tight")
 
 
-def _add_hover_effects(path_svg: Path, suites: list[Suite]) -> None:
+def _add_hover_effects(path_svg: "Path", suites: "list[Suite]") -> None:
+    import xml.etree.ElementTree as ET
+
     # Prevent ugly namespace names in XML output
     ns = {
         "": "http://www.w3.org/2000/svg",
@@ -192,9 +198,11 @@ def _add_hover_effects(path_svg: Path, suites: list[Suite]) -> None:
     tree.write(path_svg, encoding="utf-8")
 
 
-def _get_sorted_deps(suites: list[Suite]) -> list[str]:
+def _get_sorted_deps(suites: "list[Suite]") -> list[str]:
     """Returns list of dependencies sorted descending by time in use."""
-    durations: dict[str, timedelta] = {}
+    from datetime import timedelta
+
+    durations: "dict[str, timedelta]" = {}
 
     for s in suites:
         for d in s.deps:

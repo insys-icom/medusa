@@ -3,22 +3,26 @@ import re
 import sys
 from io import StringIO
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from robot import running
 from robot.api import SuiteVisitor
-from robot.errors import Information  # type: ignore
-from robot.rebot import rebot  # type: ignore
 from robot.run import RobotFramework  # type: ignore
 
 from .data import Data
 from .robot_reader import RobotSuiteWalker
-from .settings import Settings
-from .suite import Suite
 from .utils import LOGGER, Timer
 
+if TYPE_CHECKING:
+    from typing import Any
 
-def fetch_robot_data(settings: Settings) -> Data:
+    from .settings import Settings
+    from .suite import Suite
+
+
+def fetch_robot_data(settings: "Settings") -> "Data":
+    from robot.errors import Information  # type: ignore
+
     t = Timer("processing suite data")
     t.timer_start()
 
@@ -77,7 +81,7 @@ def fetch_robot_data(settings: Settings) -> Data:
     return data
 
 
-def _get_pretty_metadata(suite: Suite) -> dict[str, str]:
+def _get_pretty_metadata(suite: "Suite") -> dict[str, str]:
     """Get a dictionary representation of suite metadata as it was resolved
     with variables all resolved and lists flattened.
     """
@@ -94,7 +98,7 @@ def _get_pretty_metadata(suite: Suite) -> dict[str, str]:
     return metadata
 
 
-def run_suite(suite: Suite, settings: Settings):
+def run_suite(suite: "Suite", settings: "Settings"):
     # Get independent process group, otherwise any interrupt that the parent
     # receives is also received by this process
     os.setsid()
@@ -159,7 +163,7 @@ def run_suite(suite: Suite, settings: Settings):
 
 
 class SuitePrepModifier(SuiteVisitor):
-    def __init__(self, target_suite: Suite | None = None):
+    def __init__(self, target_suite: "Suite|None" = None):
         super().__init__()
         self.suffix: str | None = None
         self.metadata: dict[str, str] | None = None
@@ -170,7 +174,7 @@ class SuitePrepModifier(SuiteVisitor):
             self.metadata = _get_pretty_metadata(target_suite)
             self.source = target_suite.source.resolve()
 
-    def start_suite(self, suite: running.TestSuite):
+    def start_suite(self, suite: "running.TestSuite"):
         # Edge case: If we execute a single medusa:for suite file, we end up
         # having multiple root suites with different names (because we change
         # the name). In this case, we need to artificially create a parent.
@@ -222,7 +226,7 @@ class SuitePrepModifier(SuiteVisitor):
 class SuitePrepDeleter(SuiteVisitor):
     """Deletes empty suites and sets the correct execution mode."""
 
-    def start_suite(self, suite: running.TestSuite):
+    def start_suite(self, suite: "running.TestSuite"):
         # Robot adds all the other suites that were specified as command line
         # arguments, even though we use `parseinclude` to only run a single
         # suite. They are simply empty suites though (besides an edge case
@@ -256,6 +260,8 @@ def merge_results(results_path: Path) -> None:
 
     If any other error is encountered, the merge is aborted.
     """
+    from robot.rebot import rebot  # type: ignore
+
     t = Timer("merging results")
     t.timer_start()
 

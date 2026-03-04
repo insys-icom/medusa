@@ -2,11 +2,16 @@ import secrets
 from collections import Counter
 from enum import Enum, auto
 from itertools import chain
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING
 
 from .errors import MetadataError
-from .utils import Stats, Timeout, Timer
+from .utils import Stats, Timer
+
+if TYPE_CHECKING:
+    from pathlib import Path
+    from typing import Any
+
+    from .utils import Timeout
 
 
 class Status(Enum):
@@ -48,12 +53,12 @@ class Suite(Stats, Timer):
     def __init__(
         self,
         full_name: str,
-        source: Path,
+        source: "Path",
         stage: str,
         deps_static: frozenset[str],
         deps_dynamic: dict[str, DynDep],
-        timeout: Timeout | None,
-        for_vars: dict[str, Any] | None,
+        timeout: "Timeout|None",
+        for_vars: "dict[str, Any]|None",
         **kwargs,
     ) -> None:
         self.full_name = full_name
