@@ -164,7 +164,7 @@ Given these three suites in the same stage:
 The suites _Suite1_ and _Suite2_ will not be executed in parallel because they both have the dependency _bar_. _Suite3_ will be executed in parallel to the other two because it does not have any dependencies in common with them.
 
 ### Dynamic dependencies
-Medusa can also pick a dependency from a list of options at runtime, depending on whether one of the options is available. This can be done with the `ANY $ITEM IN $LIST` syntax. `$LIST` has to be a list variable and `$ITEM` needs to be defined with value `None` (`${None}` in Robot Framework) Here is an example for a suite that can run on any one device out of a list:
+Medusa can also pick a dependency from a list of options at runtime, depending on whether one of the options is available. This can be done with the `ANY $ITEM IN $ITERABLE` syntax. `$ITERABLE` has to be any iterable type containing `str` values, such as a `list` or `set`. Here is an example for a suite that can run on any one device out of a list:
 ```robot
 *** Settings ***
 Metadata    medusa:deps    ANY $DUT IN $DEVICES
@@ -180,7 +180,7 @@ Dynamic dependencies can also be combined with `medusa:for`, for example in orde
 
 
 ## `medusa:for` (optional)
-The `medusa:for` metadata key can be used to execute one suite multiple times with differently set suite variables. This could be used to run the same test suite in parallel against multiple endpoints or test devices or with slightly differing configuration. `medusa:for` expects the format `$TARGET    [$TARGET...]    IN    $SOURCE`. The `$SOURCE` is either a list or dictionary of input values and the `$TARGET`s are variable names to assign the input values to. The target variables have to be declared with value `${None}`.
+The `medusa:for` metadata key can be used to execute one suite multiple times with differently set suite variables. This could be used to run the same test suite in parallel against multiple endpoints or test devices or with slightly differing configuration. `medusa:for` expects the format `$TARGET    [$TARGET...]    IN    $SOURCE`. The `$SOURCE` must be either a `Mapping` (such as `dict`) or an `Iterable` (such as `list` or `set`) of input values and the `$TARGET`s are variable names to assign the input values to.
 
 Example with one target variable and simple input list:
 ```robot
@@ -221,7 +221,7 @@ Metadata    medusa:for    $DUT    $VAL    IN    $RUNS
 
 *** Variables ***
 # Targets:  DUT=VAL
-&{DUTS}
+&{RUNS}
 ...         foo=one
 ...         bar=two
 
