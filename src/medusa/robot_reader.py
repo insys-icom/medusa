@@ -297,11 +297,15 @@ class RobotSuiteReader:
                         f"Variable '{var}' is not defined. Target variables must be defined with value '${{None}}'",
                     )
 
-                if val is not None:
-                    raise MetadataError(
-                        "medusa:for",
-                        f"Variable '{var}' already has value '{val}'. Target variables must be defined with value '${{None}}'",
-                    )
+                # XXX(etaric): Can't force this to be None if we want to allow
+                #              executing a suite with robot AND medusa. For
+                #              that, a user needs to be able to set a value
+                #              which robot can use.
+                # if val is not None:
+                #     raise MetadataError(
+                #         "medusa:for",
+                #         f"Variable '{var}' already has value '{val}'. Target variables must be defined with value '${{None}}'",
+                #     )
                 vars[i] = var.strip("${}")
 
             if isinstance(source, Mapping):
