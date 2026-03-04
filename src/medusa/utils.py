@@ -4,12 +4,15 @@ from abc import ABC
 from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Self
+from typing import TYPE_CHECKING
 
 from .constants import T_HARD, T_KILL
 from .errors import MedusaError
 
 LOGGER = logging.getLogger("medusa")
+
+if TYPE_CHECKING:
+    from typing import Self
 
 
 @dataclass
@@ -26,7 +29,7 @@ class Timeout:
         self.kill_total = self.hard_total + self.kill
 
     @classmethod
-    def from_argstr(cls, argstr: str | None) -> Self | None:
+    def from_argstr(cls, argstr: str | None) -> "Self|None":
         if not argstr:
             return None
 

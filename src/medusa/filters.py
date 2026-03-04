@@ -1,10 +1,14 @@
 import re
 from enum import StrEnum
-from typing import Self
+from typing import TYPE_CHECKING
 
 from .constants import META_RE
 from .errors import MedusaError
-from .suite import Suite
+
+if TYPE_CHECKING:
+    from typing import Self
+
+    from .suite import Suite
 
 
 class Operator(StrEnum):
@@ -46,7 +50,7 @@ class FilterExpr:
         self.excl = excl
 
     @classmethod
-    def from_arg(cls, arg: str) -> Self:
+    def from_arg(cls, arg: str) -> "Self":
         pattern = r"(?P<flt>deps|stage)(?P<op>[=~])(?P<vals>.+)"
 
         matches = re.fullmatch(pattern, arg)
@@ -89,7 +93,7 @@ class Filters:
                 self._deps_excl |= flt.excl
                 self._deps_incl |= flt.incl
 
-    def match_and_narrow(self, s: Suite) -> bool:
+    def match_and_narrow(self, s: "Suite") -> bool:
         """Checks whether the suite is allowed to run based on the filter rules
         and narrows dynamic deps if necessary to match the filter criteria.
 

@@ -1,11 +1,14 @@
 from collections import Counter
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from .data import Data
 from .errors import MedusaError
 
+if TYPE_CHECKING:
+    from .data import Data
 
-def print_stats(data: Data, selection: str) -> None:
+
+def print_stats(data: "Data", selection: str) -> None:
     try:
         selections: set[str] = set(selection.split(","))
     except Exception:
@@ -66,7 +69,7 @@ def print_stats(data: Data, selection: str) -> None:
             _print_static(data)
 
 
-def _print_suites(data: Data) -> None:
+def _print_suites(data: "Data") -> None:
     _print_title("Suites")
     for stage in sorted(data.stages.values(), key=lambda s: s.name):
         print("Stage", stage.name)
@@ -87,7 +90,7 @@ def _print_suites(data: Data) -> None:
         print()
 
 
-def _print_static(data: Data) -> None:
+def _print_static(data: "Data") -> None:
     _print_title("Static deps")
     for name, count in sorted(
         data.deps_static_cnt.items(), key=lambda name_count: name_count[0]
@@ -97,7 +100,7 @@ def _print_static(data: Data) -> None:
     print()
 
 
-def _print_dynamic(data: Data) -> None:
+def _print_dynamic(data: "Data") -> None:
     _print_title("Dynamic deps")
     for name, count in sorted(
         data.deps_dynamic_cnt.items(), key=lambda name_count: name_count[0]
@@ -107,7 +110,7 @@ def _print_dynamic(data: Data) -> None:
     print()
 
 
-def _print_totals(data: Data) -> None:
+def _print_totals(data: "Data") -> None:
     _print_title("Totals")
     print("Stages:", len(data.stages))
     print("Suites:", data.n_suites)
@@ -122,7 +125,7 @@ def _print_totals(data: Data) -> None:
     print()
 
 
-def _print_stages(data: Data) -> None:
+def _print_stages(data: "Data") -> None:
     _print_title("Stages")
     for s in sorted(data.stages.values(), key=lambda stage: stage.name):
         s_unit = "Suite" if s.n_suites == 1 else "Suites"
@@ -131,7 +134,7 @@ def _print_stages(data: Data) -> None:
     print()
 
 
-def _print_deps(data: Data) -> None:
+def _print_deps(data: "Data") -> None:
     _print_title("Deps")
     total: Counter[str] = Counter(data.deps_static_cnt)
     total.update(data.deps_dynamic_cnt)
@@ -145,7 +148,7 @@ def _print_deps(data: Data) -> None:
     print()
 
 
-def _print_tags(data: Data) -> None:
+def _print_tags(data: "Data") -> None:
     _print_title("Tags")
     for name, count in sorted(
         data.tags.items(), key=lambda name_count: name_count[0]

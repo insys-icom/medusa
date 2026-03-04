@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
-from typing import Any
-
-from robot import running
-from robot.libraries.BuiltIn import BuiltIn  # type: ignore
+from typing import TYPE_CHECKING
 
 from .errors import MetadataError, VariableError
+
+if TYPE_CHECKING:
+    from typing import Any
+
+    from robot import running
 
 
 class UndefinedType(object):
@@ -22,29 +24,31 @@ Undefined = UndefinedType()  # UndefinedType object, used like NoneType's None
 
 class RobotHandlerInterface(ABC):
     @abstractmethod
-    def set_variables(self, varmap: dict[str, Any]) -> None:
+    def set_variables(self, varmap: "dict[str, Any]") -> None:
         pass
 
     @abstractmethod
-    def replace_variables(self, s: str) -> Any:
+    def replace_variables(self, s: str) -> "Any":
         pass
 
     @abstractmethod
-    def get_variable_value(self, name: str) -> Any:
+    def get_variable_value(self, name: str) -> "Any":
         pass
 
     @abstractmethod
     def get_metadata(
-        self, suite: running.TestSuite, name: str, required: bool
+        self, suite: "running.TestSuite", name: str, required: bool
     ) -> str | None:
         pass
 
 
 class RobotHandler(RobotHandlerInterface):
     def __init__(self):
+        from robot.libraries.BuiltIn import BuiltIn  # type: ignore
+
         self._builtin = BuiltIn()
 
-    def set_variables(self, varmap: dict[str, Any]):
+    def set_variables(self, varmap: "dict[str, Any]"):
         for key, value in varmap.items():
             try:
                 self._builtin.set_suite_variable(f"${key}", value)
@@ -53,7 +57,7 @@ class RobotHandler(RobotHandlerInterface):
                     key, f"Failed to set value '{value}'", str(e)
                 )
 
-    def replace_variables(self, s: str) -> Any:
+    def replace_variables(self, s: str) -> "Any":
         """Replace all variables in the given string.
 
         If the string consists of a single variable, it will be returned
@@ -76,7 +80,7 @@ class RobotHandler(RobotHandlerInterface):
         except Exception as e:
             raise VariableError(s, str(e))
 
-    def get_variable_value(self, name: str) -> Any:
+    def get_variable_value(self, name: str) -> "Any":
         """Return value of variable. Returns Undefined if variable is unset.
         Raises VariableError if var is not a valid variable."""
         try:
@@ -94,7 +98,7 @@ class RobotHandler(RobotHandlerInterface):
         return val
 
     def get_metadata(
-        self, suite: running.TestSuite, name: str, required: bool
+        self, suite: "running.TestSuite", name: str, required: bool
     ) -> str | None:
         try:
             return suite.metadata[name]

@@ -6,13 +6,18 @@ import os
 import signal
 import sys
 from dataclasses import dataclass, field
-from typing import Any, Self
+from typing import TYPE_CHECKING
 
-from .data import Data, Stage, Status
+from .data import Status
 from .robot import run_suite
-from .settings import Settings
-from .suite import Suite
 from .utils import LOGGER, Timer
+
+if TYPE_CHECKING:
+    from typing import Any, Self
+
+    from .data import Data, Stage
+    from .settings import Settings
+    from .suite import Suite
 
 
 class _SignalMonitor:
@@ -36,7 +41,7 @@ class _SignalMonitor:
                 + " Further signals will be sent directly to running robot processes."
             )
 
-    def __enter__(self) -> Self:
+    def __enter__(self) -> "Self":
         signal.signal(signal.Signals.SIGINT, self)
         signal.signal(signal.Signals.SIGTERM, self)
         return self
@@ -50,7 +55,7 @@ SIGNAL_MONITOR = _SignalMonitor()
 
 
 class DepManager:
-    def __init__(self, stage: Stage):
+    def __init__(self, stage: "Stage"):
         all_deps: set[str] = set(stage.deps_static_cnt).union(
             stage.deps_dynamic_cnt
         )
@@ -58,7 +63,7 @@ class DepManager:
         self.available = set(all_deps)
         self.in_use: set[str] = set()
 
-    def try_lock(self, suite: Suite) -> bool:
+    def try_lock(self, suite: "Suite") -> bool:
         """Attempt to lock dependencies for the given suite. Returns True on
         success or False if not all necessary dependencies were available."""
         deps_assigned = suite.try_assign_deps(self.available)
@@ -73,7 +78,7 @@ class DepManager:
         self.in_use.update(deps_assigned)
         return True
 
-    def free(self, suite: Suite):
+    def free(self, suite: "Suite"):
         deps_assigned = suite.deps
         assert deps_assigned.issubset(self.all)
         assert deps_assigned.issubset(self.in_use)
@@ -84,23 +89,23 @@ class DepManager:
 
 @dataclass
 class ProcessInfo:
-    process: multiprocessing.Process
+    process: "multiprocessing.Process"
     interrupt_count: int = 0
-    start_time: datetime.datetime = field(
+    start_time: "datetime.datetime" = field(
         default_factory=datetime.datetime.now, init=False
     )
 
 
 @dataclass
 class ProcessManager:
-    settings: Settings
+    settings: "Settings"
 
     # map of sentinel: ProcessInfo
-    processes: dict[Any, ProcessInfo] = field(default_factory=dict)
-    suites: dict[Any, Suite] = field(default_factory=dict)
+    processes: "dict[Any, ProcessInfo]" = field(default_factory=dict)
+    suites: "dict[Any, Suite]" = field(default_factory=dict)
     running: bool = field(default=False)
 
-    def start(self, suite: Suite):
+    def start(self, suite: "Suite"):
         p = multiprocessing.Process(
             target=run_suite, args=(suite, self.settings)
         )
@@ -112,7 +117,7 @@ class ProcessManager:
         self.suites[p.sentinel] = suite
         self.running = True
 
-    def get_finished_suites(self) -> list[Suite]:
+    def get_finished_suites(self) -> "list[Suite]":
         ret = list()
         for sentinel in multiprocessing.connection.wait(
             self.processes.keys(), timeout=1.0
@@ -200,7 +205,7 @@ class ProcessManager:
 
 
 class Runner:
-    def __init__(self, settings: Settings, stage: Stage):
+    def __init__(self, settings: "Settings", stage: "Stage"):
         self.stage = stage
 
         self.depmgr = DepManager(stage)
@@ -212,7 +217,7 @@ class Runner:
             self.interactive = False
 
     @classmethod
-    def run(cls, settings: Settings, data: Data):
+    def run(cls, settings: "Settings", data: "Data"):
         t = Timer("execution")
         t.timer_start()
 
