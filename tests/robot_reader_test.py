@@ -236,6 +236,14 @@ def test__get_timeout_absent() -> None:
             ],
         ),
         (
+            "${scalar}    in    ${list_var}",
+            [
+                {"scalar": "val1"},
+                {"scalar": "val2"},
+                {"scalar": "val3"},
+            ],
+        ),
+        (
             "${target1}    ${target2}    IN    ${nested_list}",
             [
                 {"target1": "val1.1", "target2": "val1.2"},
