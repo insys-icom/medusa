@@ -113,7 +113,23 @@ class Suite(Stats, Timer):
     def try_assign_deps(
         self, available_deps: set[str] | None = None
     ) -> set[str] | None:
+        """Checks dependencies against available_deps and performs assignment.
+
+        Args:
+            available_deps: Set of available dependencies to check assignment
+              against. If None, only a plausibility check is performed without
+              assigning values.
+
+        Returns:
+            If available_deps is set[str]: Final set of dependencies if an
+              assignment was found, otherwise None.
+
+            If available_deps is None: Empty set if an assignment was found,
+              otherwise None.
+        """
+        dry_run = False
         if available_deps is None:
+            dry_run = True
             available_deps = set(self.deps_static).union(
                 {d for d in self.deps_dynamic_cnt.keys()}
             )
@@ -127,8 +143,11 @@ class Suite(Stats, Timer):
         if assignments is None:
             return None
 
-        for name, _get_deps_assignment in assignments.items():
-            self.deps_dynamic[name].value = _get_deps_assignment
+        if dry_run:
+            return set()
+
+        for name, value in assignments.items():
+            self.deps_dynamic[name].value = value
 
         return self.deps
 
