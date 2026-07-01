@@ -8,8 +8,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from .data import Status
 from .robot import run_suite
+from .suite import Result, Status
 from .utils import LOGGER, Timer
 
 if TYPE_CHECKING:
@@ -128,8 +128,11 @@ class ProcessManager:
 
             suite = self.suites[sentinel]
             suite.status = Status.FINISHED
+            suite.result = Result.from_exitcode(pinfo.process.exitcode)
             suite.timer_end()
-            LOGGER.info(f"Finished '{suite.full_name}' ({suite.t_duration})")
+            LOGGER.info(
+                f"Finished '{suite.full_name}': {suite.result} ({suite.t_duration})"
+            )
 
             ret.append(suite)
             del self.suites[sentinel]
@@ -272,6 +275,9 @@ class Runner:
         pending = self.stage.pending
         started = self.stage.started
         finished = self.stage.finished
+        passed = self.stage.passed
+        failed = self.stage.failed
+        errored = self.stage.errored
 
         total = pending + started + finished
         percent = int((finished / total) * 100)
@@ -280,6 +286,7 @@ class Runner:
             + f" Suites pending: {pending:<4}"
             + f" running: {started:<4}"
             + f" finished: {finished:<4}"
+            + f" (PASS: {passed:<4} FAIL: {failed:<4} ERR: {errored:<4})"
         )
 
         # In interactive mode, we just keep overwriting the current status by

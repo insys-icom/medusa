@@ -1,6 +1,6 @@
 import secrets
 from collections import Counter
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from itertools import chain
 from typing import TYPE_CHECKING
 
@@ -9,7 +9,7 @@ from .utils import Stats, Timer
 
 if TYPE_CHECKING:
     from pathlib import Path
-    from typing import Any
+    from typing import Any, Self
 
     from .utils import Timeout
 
@@ -18,6 +18,25 @@ class Status(Enum):
     PENDING = auto()
     STARTED = auto()
     FINISHED = auto()
+
+
+class Result(StrEnum):
+    NOT_EXECUTED = "NOT EXECUTED"
+    PASS = "PASS"
+    FAIL = "FAIL"
+    ERR = "ERR"
+
+    @classmethod
+    def from_exitcode(cls, exitcode: int | None) -> "Self":
+        if exitcode is None:
+            # TODO: Add nicer handling for this very unlikely case?
+            return Result.ERR
+        elif exitcode == 0:
+            return Result.PASS
+        elif exitcode > 0 and exitcode <= 250:
+            return Result.FAIL
+        else:
+            return Result.ERR
 
 
 class DynDep:
@@ -68,6 +87,7 @@ class Suite(Stats, Timer):
         self.deps_dynamic = deps_dynamic
         self.timeout = timeout
         self.for_vars = for_vars
+        self.result: Result = Result.NOT_EXECUTED
         self.status: Status = Status.PENDING
         self.suffix = ""
 
