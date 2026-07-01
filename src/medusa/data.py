@@ -1,6 +1,6 @@
 from typing import TYPE_CHECKING
 
-from .suite import Status
+from .suite import Result, Status
 from .utils import Stats, Timer
 
 if TYPE_CHECKING:
@@ -29,6 +29,18 @@ class Stage(Stats, Timer):
     @property
     def finished(self) -> int:
         return len([s for s in self.suites if s.status == Status.FINISHED])
+
+    @property
+    def passed(self) -> int:
+        return len([s for s in self.suites if s.result == Result.PASS])
+
+    @property
+    def failed(self) -> int:
+        return len([s for s in self.suites if s.result == Result.FAIL])
+
+    @property
+    def errored(self) -> int:
+        return len([s for s in self.suites if s.result == Result.ERR])
 
 
 class Data(Stats):

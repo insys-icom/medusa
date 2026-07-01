@@ -159,7 +159,7 @@ def run_suite(suite: "Suite", settings: "Settings"):
         sys.__stderr__ = stderr  # type: ignore
         opts["stdout"] = stdout
         opts["stderr"] = stderr
-        rf.execute(*args, **opts)
+        sys.exit(rf.execute(*args, **opts))
 
 
 class SuitePrepModifier(SuiteVisitor):
