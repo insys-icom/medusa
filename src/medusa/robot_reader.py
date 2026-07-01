@@ -81,6 +81,7 @@ class RobotSuiteReader:
         source = suite.source
         stage = self._get_stage(suite)
         timeout = self._get_timeout(suite)
+        retry = self._get_retry(suite)
         deps_static, deps_dynamic = self._get_deps(suite)
         tags = Counter(
             chain.from_iterable([test.tags for test in suite.tests])
@@ -94,6 +95,7 @@ class RobotSuiteReader:
             stage=stage,
             timeout=timeout,
             for_vars=for_vars,
+            retry=retry,
             deps_static=deps_static,
             deps_dynamic=deps_dynamic,
             tags=tags,
@@ -370,6 +372,19 @@ class RobotSuiteReader:
                     )
 
         return maps
+
+    def _get_retry(self, suite: "running.TestSuite") -> int:
+        try:
+            retry_str = self.robot_handler.get_metadata(
+                suite, "medusa:retry", False
+            )
+            if not retry_str:
+                return 0
+
+            retry_str = self.robot_handler.replace_variables(retry_str)
+            return int(retry_str)
+        except Exception as e:
+            raise MetadataError("medusa:retry", str(e))
 
     def _split_args(self, args: str) -> list[str]:
         res = re.split(r" {2,}", args)

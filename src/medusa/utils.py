@@ -79,6 +79,9 @@ class Stats(ABC):
 class Timer:
     """Keeps track of execution time. When given a name, it outputs start and
     finish messages when calling ``timer_start`` and ``timer_end``.
+
+    Timer can save multiple segments, which is needed to support re-executing a
+    Suite multiple times.
     """
 
     def __init__(self, t_name: str | None = None, **kwargs) -> None:
@@ -86,42 +89,48 @@ class Timer:
         self._t_name = t_name
         self._t_start: datetime | None = None
         self._t_end: datetime | None = None
+        self.t_segments: list[tuple[datetime, datetime, timedelta]] = []
 
     @property
     def t_start(self) -> datetime:
-        """Time at which ``timer_start`` was called"""
+        """Time at which ``timer_start`` was called (most recent segment)"""
         assert self._t_start
         return self._t_start
 
     @property
     def t_end(self) -> datetime:
-        """Time at which ``timer_end`` was called"""
+        """Time at which ``timer_end`` was called (most recent segment)"""
         assert self._t_end
         return self._t_end
 
     @property
     def t_duration(self) -> timedelta:
-        """Duration from ``t_start`` to ``t_end``, rounded to seconds"""
+        """Duration from ``t_start`` to ``t_end``, rounded to seconds (most recent segment)"""
         return timedelta(
             seconds=int((self.t_end - self.t_start).total_seconds())
         )
 
-    @property
-    def t_duration_accurate(self) -> timedelta:
-        """Duration from ``t_start`` to ``t_end``"""
-        return timedelta(seconds=(self.t_end - self.t_start).total_seconds())
-
     def timer_start(self):
-        assert not self._t_start
+        # forbid starting twice in a row
+        assert not self._t_start or self._t_end
         self._t_start = datetime.now()
+        self._t_end = None
 
         if self._t_name:
             print(f"Started {self._t_name}...")
 
     def timer_end(self):
+        # forbid ending twice in a row
         assert self._t_start
         assert not self._t_end
         self._t_end = datetime.now()
 
+        self.t_segments.append((self._t_start, self._t_end, self._t_duration_accurate))
+
         if self._t_name:
             print(f"Finished {self._t_name} ({self.t_duration})", end="\n\n")
+
+    @property
+    def _t_duration_accurate(self) -> timedelta:
+        """Duration from ``t_start`` to ``t_end``"""
+        return timedelta(seconds=(self.t_end - self.t_start).total_seconds())

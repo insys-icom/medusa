@@ -105,19 +105,23 @@ class ProcessManager:
     suites: "dict[Any, Suite]" = field(default_factory=dict)
     running: bool = field(default=False)
 
-    def start(self, suite: "Suite"):
+    def start(self, suite: "Suite", *, retry: bool = False):
         p = multiprocessing.Process(
-            target=run_suite, args=(suite, self.settings)
+            target=run_suite, args=(suite, self.settings, retry)
         )
         LOGGER.info(f"Starting '{suite.full_name}'")
         p.start()
+
+        if retry:
+            suite.retry -= 1
+
         suite.status = Status.STARTED
         suite.timer_start()
         self.processes[p.sentinel] = ProcessInfo(p)
         self.suites[p.sentinel] = suite
         self.running = True
 
-    def get_finished_suites(self) -> "list[Suite]":
+    def get_finished_suites(self, *, retry: bool = False) -> "list[Suite]":
         ret = list()
         for sentinel in multiprocessing.connection.wait(
             self.processes.keys(), timeout=1.0
@@ -127,8 +131,15 @@ class ProcessManager:
             del self.processes[sentinel]
 
             suite = self.suites[sentinel]
-            suite.status = Status.FINISHED
             suite.result = Result.from_exitcode(pinfo.process.exitcode)
+
+            if retry and suite.result == Result.FAIL and suite.retry > 0:
+                # Flaky suite failed and has remaining retries so we leave it
+                # pending to be retried again.
+                suite.status = Status.PENDING
+            else:
+                suite.status = Status.FINISHED
+
             suite.timer_end()
             LOGGER.info(
                 f"Finished '{suite.full_name}': {suite.result} ({suite.t_duration})"
@@ -228,16 +239,34 @@ class Runner:
             runner = cls(settings, stage)
 
             with SIGNAL_MONITOR:
+                stage.timer_start()
                 runner.run_stage()
+                runner.retry_failed()
+                stage.timer_end()
 
             if SIGNAL_MONITOR.signal_count > 0:
                 break  # We got a SIGINT or SIGTERM, don't start more stages
 
         t.timer_end()
 
-    def run_stage(self):
-        self.stage.timer_start()
+    def retry_failed(self):
+        retry_suites = [
+            s
+            for s in self.stage.suites
+            if s.result == Result.FAIL and s.retry > 0
+        ]
 
+        if not retry_suites:
+            return  # Nothing to retry
+
+        # Reset status to pending to re-run them with run_stage
+        for s in retry_suites:
+            s.status = Status.PENDING
+
+        print("Re-running failed suites with medusa:retry metadata...")
+        self.run_stage(retry=True)
+
+    def run_stage(self, *, retry: bool = False):
         interrupted = False
         self.print_status()
 
@@ -251,7 +280,7 @@ class Runner:
                 interrupted = True
 
             # Process finished suites
-            for suite in self.procmgr.get_finished_suites():
+            for suite in self.procmgr.get_finished_suites(retry=retry):
                 self.depmgr.free(suite)
                 change_happened = True
 
@@ -263,13 +292,11 @@ class Runner:
 
                 for suite in pending:
                     if self.depmgr.try_lock(suite):
-                        self.procmgr.start(suite)
+                        self.procmgr.start(suite, retry=retry)
                         change_happened = True
 
             if change_happened:
                 self.print_status()
-
-        self.stage.timer_end()
 
     def print_status(self):
         pending = self.stage.pending
