@@ -98,7 +98,7 @@ def _get_pretty_metadata(suite: "Suite") -> dict[str, str]:
     return metadata
 
 
-def run_suite(suite: "Suite", settings: "Settings"):
+def run_suite(suite: "Suite", settings: "Settings", retry: bool):
     # Get independent process group, otherwise any interrupt that the parent
     # receives is also received by this process
     os.setsid()
@@ -109,11 +109,12 @@ def run_suite(suite: "Suite", settings: "Settings"):
     args: list[str] = opts_args[1]
 
     result_dir = settings.outputdir / suite.stage / suite.full_name
-    result_dir.mkdir(parents=True, exist_ok=False)
+    if not retry:
+        result_dir.mkdir(parents=True, exist_ok=False)
 
     # Deletes unnecessary empty suites and sets correct execution mode. Also
     # writes suite metadata and appends suffix to suite name for `medusa:for`
-    opts.setdefault("prerunmodifier", list())
+    opts.setdefault("prerunmodifier", list())  # Don't overwrite user opts
     opts["prerunmodifier"].insert(0, SuitePrepModifier(suite))
     opts["prerunmodifier"].insert(0, SuitePrepDeleter())
 
@@ -122,14 +123,22 @@ def run_suite(suite: "Suite", settings: "Settings"):
     if len(args) > 1:
         opts["name"] = "Medusa"
 
+    # If this is a re-run, we write to differently named files
+    suffix = "_retry" if retry else ""
+
     opts["parseinclude"] = suite.source  # Only execute the current suite
     opts["runemptysuite"] = True  # Some suites are empty due to parseinclude
     opts["log"] = None  # No log.html
     opts["report"] = None  # No report.html
-    opts["output"] = result_dir / "output.xml"
+    opts["output"] = result_dir / f"output{suffix}.xml"
+
+    # Mark tests that were re-executed due to medusa:retry metadata
+    if retry:
+        opts.setdefault("settag", list())  # Don't overwrite user opts
+        opts["settag"].append("medusa:retry")
 
     # Make deps/stage/for available as variables and set `medusa:for` values
-    opts.setdefault("variable", list())
+    opts.setdefault("variable", list())  # Don't overwrite user opts
     opts["variable"].append(f"MEDUSA_DEPS: list:{list(suite.deps)}")
     opts["variable"].append(f"MEDUSA_STAGE: str:{suite.stage}")
     if suite.for_vars:
@@ -148,8 +157,8 @@ def run_suite(suite: "Suite", settings: "Settings"):
             opts["variable"].append(f"{name.strip('${}')}: str:{value}")
 
     # Finally we start the suite and capture stdout/stderr
-    outfile = result_dir / "stdout.txt"
-    errfile = result_dir / "stderr.txt"
+    outfile = result_dir / f"stdout{suffix}.txt"
+    errfile = result_dir / f"stderr{suffix}.txt"
     with open(outfile, "w") as stdout, open(errfile, "w") as stderr:
         # robot does not respect sys.stdout/stderr when it gets interrupted and
         # writes directly to sys.__stdout__/__stderr__ anyway. mypy does not
@@ -160,7 +169,6 @@ def run_suite(suite: "Suite", settings: "Settings"):
         opts["stdout"] = stdout
         opts["stderr"] = stderr
         sys.exit(rf.execute(*args, **opts))
-
 
 class SuitePrepModifier(SuiteVisitor):
     def __init__(self, target_suite: "Suite|None" = None):
@@ -278,7 +286,7 @@ def merge_results(results_path: Path) -> None:
     while not abort:
         with StringIO() as stdout, StringIO() as stderr:
             rebot(
-                *suite_outputs,
+                *sorted(suite_outputs),
                 merge=True,
                 output=output,
                 outputdir=results_path,
@@ -358,9 +366,8 @@ def _get_output_paths(path: Path) -> tuple[set[Path], bool]:
             ret.update(paths)
             if subdir_failed:
                 failed = True
-        elif p.name == "output.xml":
+        elif p.name == "output.xml" or p.name == "output_retry.xml":
             ret.add(p)
-            break  # Early stop, no need to seek more subdirs
 
     if not ret and not failed:
         failed = True

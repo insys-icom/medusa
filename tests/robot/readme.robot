@@ -4,12 +4,16 @@ Documentation    Using `medusa:for`, this suite is executed three times in two
 ...    executions in stage 0 are run in parallel since their dependencies don't
 ...    overlap. One port is picked arbitrarily from a different list of ports
 ...    in each run.
+...
 ...    The suite has a soft timeout of 300 seconds, a hard timeout of 30
 ...    seconds and a kill timeout of 5 seconds.
+...
+...    If the suite were to fail, it would be re-executed once.
 Metadata    medusa:for        $STAGE    $DUT1    $DUT2    $PORTS    IN    $RUNS
 Metadata    medusa:deps       $DUT1    $DUT2   ANY $PORT IN $PORTS
 Metadata    medusa:stage      $STAGE
 Metadata    medusa:timeout    300,30,5
+Metadata    medusa:retry      1
 
 
 *** Variables ***

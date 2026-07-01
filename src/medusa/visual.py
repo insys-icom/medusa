@@ -23,14 +23,16 @@ svg {
 
 HOVER_FMT = """Suite: {name}
 
+Result: {result}
 Source: {source}
 Stage: {stage}
 Deps: {deps}
 Tags: {tags}
-Started: {start}
+{segments}"""
+
+SEGMENT_FMT = """Started: {start}
 Finished: {end}
-Duration: {duration}
-"""
+Duration: {duration}"""
 
 
 def write_visualization(settings: "Settings", data: "Data") -> None:
@@ -95,13 +97,14 @@ def _create_plot(
 
     for i, s in enumerate(suites):
         ypositions = [deps.index(d) for d in s.deps]
-        ax.barh(
-            ypositions,
-            width=s.t_duration_accurate,  # type: ignore
-            left=s.t_start,  # type: ignore
-            gid=s.full_name,
-            color=cmap(i % 10),
-        )
+        for start, _, duration in s.t_segments:
+            ax.barh(
+                ypositions,
+                width=duration,  # type: ignore
+                left=start,  # type: ignore
+                gid=s.full_name,
+                color=cmap(i % 10),
+            )
 
     # Locator determines which ticks are shown
     locator = AutoDateLocator(minticks=3, maxticks=6)
@@ -149,6 +152,7 @@ def _create_plot(
 
 def _add_hover_effects(path_svg: "Path", suites: "list[Suite]") -> None:
     import xml.etree.ElementTree as ET
+    from datetime import timedelta
 
     # Prevent ugly namespace names in XML output
     ns = {
@@ -183,16 +187,26 @@ def _add_hover_effects(path_svg: "Path", suites: "list[Suite]") -> None:
     for s, e in suite_elements:
         new_group = ET.SubElement(axes, "g", attrib={"class": "suite"})
         new_group.extend(e)
+
+        time_segments: list[str] = []
+        for start, end, duration in s.t_segments:
+            time_segments.append(
+                SEGMENT_FMT.format(
+                    start=start,
+                    end=end,
+                    duration=timedelta(seconds=int(duration.total_seconds())),
+                )
+            )
+
         description = ET.SubElement(new_group, "title")
         description.text = HOVER_FMT.format(
             name=s.full_name,
+            result=s.result,
             source=s.source,
             stage=s.stage,
             deps=sorted(s.deps),
             tags=dict(s.tags),
-            start=s.t_start,
-            end=s.t_end,
-            duration=s.t_duration,
+            segments="\n\nRetry:\n".join(time_segments),
         )
 
     tree.write(path_svg, encoding="utf-8")

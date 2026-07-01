@@ -282,3 +282,47 @@ def test__get_for_absent() -> None:
 
     # Assert
     assert ret is None
+
+
+@pytest.mark.parametrize(
+    "input, expected",
+    [
+        ("3", 3),
+        ("${int_var}", 42),
+    ],
+)
+def test__get_retry(input: str, expected: str) -> None:
+    # Arrange
+    mock_handler = MockRobotHandler()
+    suite_reader = RobotSuiteReader(mock_handler)
+
+    mock_handler.metadata["medusa:retry"] = input
+
+    # Act
+    output = suite_reader._get_retry(MOCK_SUITE)
+
+    # Assert
+    assert output == expected
+
+
+def test__get_retry_absent() -> None:
+    # Arrange
+    mock_handler = MockRobotHandler()
+    suite_reader = RobotSuiteReader(mock_handler)
+
+    # Act
+    ret = suite_reader._get_retry(MOCK_SUITE)
+
+    # Assert
+    assert ret == 0
+
+def test__get_retry_invalid() -> None:
+    # Arrange
+    mock_handler = MockRobotHandler()
+    suite_reader = RobotSuiteReader(mock_handler)
+
+    mock_handler.metadata["medusa:retry"] = "foo"
+
+    # Act, Assert
+    with pytest.raises(Exception):
+        suite_reader._get_retry(MOCK_SUITE)

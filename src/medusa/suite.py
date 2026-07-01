@@ -78,6 +78,7 @@ class Suite(Stats, Timer):
         deps_dynamic: dict[str, DynDep],
         timeout: "Timeout|None",
         for_vars: "dict[str, Any]|None",
+        retry: int,
         **kwargs,
     ) -> None:
         self.full_name = full_name
@@ -87,6 +88,7 @@ class Suite(Stats, Timer):
         self.deps_dynamic = deps_dynamic
         self.timeout = timeout
         self.for_vars = for_vars
+        self.retry = retry
         self.result: Result = Result.NOT_EXECUTED
         self.status: Status = Status.PENDING
         self.suffix = ""

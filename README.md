@@ -61,7 +61,7 @@ deactivate             # Exit the venv (when you are done)
 
 
 # Quick Start
-Add at least the required metadata `medusa:stage` and `medusa:deps` to your suite(s). Optionally add `medusa:timeout` for suite-specific timeouts or `medusa:for` for multiplying suites with different variables.
+Add at least the required metadata `medusa:stage` and `medusa:deps` to your suite(s). Optionally add `medusa:timeout` for suite-specific timeouts, `medusa:for` for multiplying suites with different variables or `medusa:retry` for retrying flaky test suites on FAIL.
 
 ``` robot
 *** Settings ***
@@ -116,7 +116,7 @@ Medusa reads the specified suite(s) and executes them. Stages are sorted alphabe
 * Set global soft/hard/kill timeouts with `-t` or `--timeout` (can be overriden with suite metadata)
 
 # Suite metadata
-The order and parallelisation of suites is determined entirely by suite metadata. For this reason, every suite needs to have at least `medusa:stage` and `medusa:deps` metadata configured. The `medusa:for` and `medusa:timeout` metadata is optional.
+The order and parallelisation of suites is determined entirely by suite metadata. For this reason, every suite needs to have at least `medusa:stage` and `medusa:deps` metadata configured. The `medusa:for`, `medusa:timeout` and `medusa:retry` metadata is optional.
 
 The below examples use the `$VAR` escaped variable syntax but the regular `${VAR}` syntax works too.
 
@@ -243,6 +243,16 @@ Metadata    medusa:timeout    300,60,5
 ```
 This results in a soft timeout of 300 seconds, a hard timeout of 60 seconds and a kill timeout of 5 seconds.
 
+## `medusa:retry` (optional)
+The `medusa:retry` metadata key can be used to re-execute a flaky test suite one or more times on failure. The parameter specifies the maximum number of retries. When a suite with `medusa:retry` fails, it is re-executed up to the given number of times __at the end of its `medusa:stage`__.
+
+Example:
+``` robot
+*** Settings ***
+Metadata    medusa:retry    2
+```
+If this suite fails, medusa attempts to execute it up to two more times at the end of its stage.
+
 
 ## Complex example using all metadata
 ``` robot
@@ -252,12 +262,16 @@ Documentation    Using `medusa:for`, this suite is executed three times in two
 ...    executions in stage 0 are run in parallel since their dependencies don't
 ...    overlap. One port is picked arbitrarily from a different list of ports
 ...    in each run.
+...
 ...    The suite has a soft timeout of 300 seconds, a hard timeout of 30
 ...    seconds and a kill timeout of 5 seconds.
+...
+...    If the suite were to fail, it would be re-executed once.
 Metadata    medusa:for        $STAGE    $DUT1    $DUT2    $PORTS    IN    $RUNS
 Metadata    medusa:deps       $DUT1    $DUT2   ANY $PORT IN $PORTS
 Metadata    medusa:stage      $STAGE
 Metadata    medusa:timeout    300,30,5
+Metadata    medusa:retry      1
 
 
 *** Variables ***

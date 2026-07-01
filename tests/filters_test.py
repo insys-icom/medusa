@@ -16,6 +16,7 @@ def static_suite() -> Suite:
         deps_dynamic={},
         timeout=None,
         for_vars=None,
+        retry=0,
     )
 
 
@@ -90,6 +91,7 @@ def dynamic_suite() -> Suite:
         },
         timeout=None,
         for_vars=None,
+        retry=0,
     )
 
 
