@@ -170,6 +170,7 @@ def run_suite(suite: "Suite", settings: "Settings", retry: bool):
         opts["stderr"] = stderr
         sys.exit(rf.execute(*args, **opts))
 
+
 class SuitePrepModifier(SuiteVisitor):
     def __init__(self, target_suite: "Suite|None" = None):
         super().__init__()
