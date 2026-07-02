@@ -1,4 +1,5 @@
-import secrets
+import hashlib
+import json
 from collections import Counter
 from enum import Enum, StrEnum, auto
 from itertools import chain
@@ -103,9 +104,17 @@ class Suite(Stats, Timer):
                 )
 
         if self.for_vars:
-            # 4 random bytes ~ 1% collision for 10k suites, we will likely have
-            # much less identical suites in reality
-            self.suffix = " " + secrets.token_hex(4)
+            # 4 hash bytes should be sufficient to prevent collisions for the
+            # expected medusa:for iteration count per suite of less than 1000
+            try:
+                self.suffix = " " + hashlib.shake_128(
+                    json.dumps(self.for_vars).encode("utf-8"),
+                    usedforsecurity=False,
+                ).hexdigest(4)
+            except Exception:
+                raise MetadataError(
+                    "medusa:for", "One or more values are not serializable"
+                )
             self.full_name = self.full_name + self.suffix
 
         assert len(bytes(self.full_name, encoding="utf-8")) <= 255
