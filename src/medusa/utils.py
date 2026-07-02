@@ -125,7 +125,9 @@ class Timer:
         assert not self._t_end
         self._t_end = datetime.now()
 
-        self.t_segments.append((self._t_start, self._t_end, self._t_duration_accurate))
+        self.t_segments.append(
+            (self._t_start, self._t_end, self._t_duration_accurate)
+        )
 
         if self._t_name:
             print(f"Finished {self._t_name} ({self.t_duration})", end="\n\n")

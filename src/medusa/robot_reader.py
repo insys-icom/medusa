@@ -308,7 +308,7 @@ class RobotSuiteReader:
                 if val is Undefined:
                     raise MetadataError(
                         "medusa:for",
-                        f"Variable '{var}' is not defined. Target variables must be defined with value '${{None}}'",
+                        f"Variable '{var}' is not defined. Target variables must be defined with any value or '${{None}}.",
                     )
 
                 # XXX(etaric): Can't force this to be None if we want to allow
@@ -340,7 +340,7 @@ class RobotSuiteReader:
         if len(vars) != 2:
             raise MetadataError(
                 "medusa:for",
-                f"Source is a mapping, which can only be assigned to 2 variables but there are {len(vars)}",
+                f"Source is a mapping, which can only be assigned to 2 variables but there are {len(vars)} target variables.",
             )
         maps = [dict(zip(vars, tup)) for tup in mapping.items()]
         return maps

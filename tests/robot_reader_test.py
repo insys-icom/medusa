@@ -316,6 +316,7 @@ def test__get_retry_absent() -> None:
     # Assert
     assert ret == 0
 
+
 def test__get_retry_invalid() -> None:
     # Arrange
     mock_handler = MockRobotHandler()
