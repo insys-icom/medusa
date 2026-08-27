@@ -104,7 +104,6 @@ def test__get_stage(input: str, expected: str) -> None:
     [
         ("one", ["one"], {}),
         ("one    two", ["one", "two"], {}),
-        ("one    two", ["one", "two"], {}),
         ("${scalar}", ["val"], {}),
         ("${int_var}", ["42"], {}),
         ("partial${scalar}", ["partialval"], {}),

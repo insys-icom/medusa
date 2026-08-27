@@ -51,7 +51,7 @@ def write_visualization(settings: "Settings", data: "Data") -> None:
     ]
 
     # Only consider stages that contain finished suites
-    stage_starts: "list[tuple[datetime, str]]" = sorted(
+    stage_starts: list[tuple[datetime, str]] = sorted(
         [(s.t_start, s.name) for s in data.stages.values() if s.finished > 0]
     )
 
@@ -90,7 +90,7 @@ def _create_plot(
     font_size_title = font_size_label * 1.4
 
     # Create a figure containing a single Axes
-    fig, ax = plt.subplots(figsize=(width, height))
+    _fig, ax = plt.subplots(figsize=(width, height))
 
     # tab10 consists of 10 relatively dark colours, good for white background
     cmap = plt.get_cmap("tab10", 10)
@@ -216,7 +216,7 @@ def _get_sorted_deps(suites: "list[Suite]") -> list[str]:
     """Returns list of dependencies sorted descending by time in use."""
     from datetime import timedelta
 
-    durations: "dict[str, timedelta]" = {}
+    durations: dict[str, timedelta] = {}
 
     for s in suites:
         for d in s.deps:

@@ -74,7 +74,7 @@ def _print_suites(data: "Data") -> None:
     for stage in sorted(data.stages.values(), key=lambda s: s.name):
         print("Stage", stage.name)
         for suite in sorted(stage.suites, key=lambda s: s.full_name):
-            path = str(suite.source.resolve().relative_to(Path().resolve()))
+            path = str(suite.source.resolve().relative_to(Path.cwd()))
 
             if suite.for_vars:
                 for_vars = ", ".join(

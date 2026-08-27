@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from robot import running
 
 
-class UndefinedType(object):
+class UndefinedType:
     """Used to check whether a robot variable was defined at all. By default
     robot returns None, but we want to use something else because we want to
     differentiate whether something was defined as None or undefined.

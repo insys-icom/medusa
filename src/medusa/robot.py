@@ -27,7 +27,7 @@ def fetch_robot_data(settings: "Settings") -> "Data":
     t.timer_start()
 
     data = Data(settings.filters)
-    errors: list[str] = list()
+    errors: list[str] = []
     suite_walker = RobotSuiteWalker(data, errors)
     rf = RobotFramework()
 
@@ -40,11 +40,11 @@ def fetch_robot_data(settings: "Settings") -> "Data":
         sys.exit(str(e))
 
     # Collects suite data
-    opts.setdefault("listener", list())  # Don't overwrite user opts
+    opts.setdefault("listener", [])  # Don't overwrite user opts
     opts["listener"].append(suite_walker)
 
     # Deletes unnecessary empty suites and sets correct execution mode
-    opts.setdefault("prerunmodifier", list())  # Don't overwrite user opts
+    opts.setdefault("prerunmodifier", [])  # Don't overwrite user opts
     opts["prerunmodifier"].insert(0, SuitePrepModifier())
     opts["prerunmodifier"].insert(0, SuitePrepDeleter())
 
@@ -114,7 +114,7 @@ def run_suite(suite: "Suite", settings: "Settings", retry: bool):
 
     # Deletes unnecessary empty suites and sets correct execution mode. Also
     # writes suite metadata and appends suffix to suite name for `medusa:for`
-    opts.setdefault("prerunmodifier", list())  # Don't overwrite user opts
+    opts.setdefault("prerunmodifier", [])  # Don't overwrite user opts
     opts["prerunmodifier"].insert(0, SuitePrepModifier(suite))
     opts["prerunmodifier"].insert(0, SuitePrepDeleter())
 
@@ -134,11 +134,11 @@ def run_suite(suite: "Suite", settings: "Settings", retry: bool):
 
     # Mark tests that were re-executed due to medusa:retry metadata
     if retry:
-        opts.setdefault("settag", list())  # Don't overwrite user opts
+        opts.setdefault("settag", [])  # Don't overwrite user opts
         opts["settag"].append("medusa:retry")
 
     # Make deps/stage/for available as variables and set `medusa:for` values
-    opts.setdefault("variable", list())  # Don't overwrite user opts
+    opts.setdefault("variable", [])  # Don't overwrite user opts
     opts["variable"].append(f"MEDUSA_DEPS: list:{list(suite.deps)}")
     opts["variable"].append(f"MEDUSA_STAGE: str:{suite.stage}")
     if suite.for_vars:
