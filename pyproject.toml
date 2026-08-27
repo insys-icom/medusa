@@ -28,10 +28,10 @@ requires-python = ">=3.11"
 [project.optional-dependencies]
 # Install with `pip3 install -e '.[dev]'
 dev = [
-    "mypy",  # Static type checker
-    "pytest",  # Unit tests
-    "ruff",  # Python linter and formatter
-    "robotframework-robocop~=6.8",  # Robot linter and formatter
+    "mypy~=2.0",  # Static type checker
+    "pytest~=9.0",  # Unit tests
+    "ruff~=0.16.4",  # Python linter and formatter
+    "robotframework-robocop~=8.8",  # Robot linter and formatter
 ]
 
 [project.urls]
