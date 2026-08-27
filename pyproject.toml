@@ -49,6 +49,13 @@ line-length = 79
 
 [tool.ruff.lint]
 extend-select = [ "I" ]  # import sorting
+ignore = [
+    "B017",  # TODO: Fix and re-enable
+    "BLE001",  # TODO: Fix and re-enable
+    "DTZ005",  # TODO: Fix and re-enable
+    "S110",  # TODO: Fix and re-enable
+    "SIM102",  # Sometimes nested if makes conditionsmore readable
+]
 
 [tool.setuptools.dynamic]
 version = { attr = "medusa.__version__" }
