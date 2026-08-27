@@ -162,7 +162,7 @@ class Suite(Stats, Timer):
         if available_deps is None:
             dry_run = True
             available_deps = set(self.deps_static).union(
-                {d for d in self.deps_dynamic_cnt.keys()}
+                {d for d in self.deps_dynamic_cnt}
             )
 
         if not self.deps_static.issubset(available_deps):

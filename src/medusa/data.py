@@ -12,7 +12,7 @@ class Stage(Stats, Timer):
     def __init__(self, name: str) -> None:
         super().__init__(t_name=f"stage {name}")
         self.name = name
-        self.suites: "list[Suite]" = []
+        self.suites: list[Suite] = []
 
     def insert(self, s: "Suite"):
         self.add_stats(s)

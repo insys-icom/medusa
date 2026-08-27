@@ -122,7 +122,7 @@ class ProcessManager:
         self.running = True
 
     def get_finished_suites(self, *, retry: bool = False) -> "list[Suite]":
-        ret = list()
+        ret = []
         for sentinel in multiprocessing.connection.wait(
             self.processes.keys(), timeout=1.0
         ):
@@ -225,7 +225,7 @@ class Runner:
         self.depmgr = DepManager(stage)
         self.procmgr = ProcessManager(settings)
 
-        if sys.stdout.isatty() and settings.log_level == logging.WARN:
+        if sys.stdout.isatty() and settings.log_level == logging.WARNING:
             self.interactive = True
         else:
             self.interactive = False

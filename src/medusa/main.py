@@ -150,7 +150,7 @@ def main() -> None:
                 stats(settings, arguments.get("--select"))
     except MedusaError as e:
         LOGGER.error(str(e))
-        exit(1)
+        sys.exit(1)
 
 
 def run(settings: "Settings"):
@@ -158,7 +158,7 @@ def run(settings: "Settings"):
     from .runner import Runner
     from .visual import write_visualization
 
-    data: "Data" = fetch_robot_data(settings)
+    data: Data = fetch_robot_data(settings)
 
     if data.n_tests <= 0:
         raise MedusaError("No tests found, nothing to run!")
@@ -182,7 +182,7 @@ def stats(settings: "Settings", selection: str):
     from .robot import fetch_robot_data
     from .stats import print_stats
 
-    data: "Data" = fetch_robot_data(settings)
+    data: Data = fetch_robot_data(settings)
     print_stats(data, selection)
 
 

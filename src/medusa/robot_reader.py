@@ -14,7 +14,6 @@ from .suite import DynDep, Suite
 from .utils import Timeout
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Mapping
     from typing import Any
 
     from robot import running
@@ -154,7 +153,7 @@ class RobotSuiteReader:
                     deps_values.append(str(resolved))
 
             deps_static: set[str] = set()
-            deps_dynamic: "dict[str, DynDep]" = {}
+            deps_dynamic: dict[str, DynDep] = {}
 
             for dep in deps_values:
                 if name_opts_tup := self._get_deps_dynamic(dep):
@@ -349,7 +348,7 @@ class RobotSuiteReader:
         self, vars: list[str], iterable: "Any"
     ) -> "list[dict[str, Any]]":
         """Raises MetadataError if the value is not iterable"""
-        maps: "list[dict[str, Any]]" = []
+        maps: list[dict[str, Any]] = []
 
         try:
             source_iter = iter(iterable)
