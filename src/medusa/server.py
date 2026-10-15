@@ -155,12 +155,82 @@ async def handle_lock(request):
 
 async def handle_unlock(request):
     # Function for unlocking currently locked devices / dependencies
-    pass
+    # PAYLOAD PARSING & VALIDATION
+    try:
+        body = await request.json()
+        devices = list(set(body.get("devices", [])))
+        client_id = body.get("client_id")
+    except Exception:
+        return web.json_response({"status": "error", "message": "Malformed JSON payload"}, status=400)
+
+    if not devices or not client_id:
+        return web.json_response({"status": "error", "message": "Missing devices or client_id fields"}, status=400)
+
+    POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
+
+    async with POOL.server_mutex:
+        print(f"[SERVER] Request for unlocking batch {devices} received from '{client_id}'. Checking status ...")
+
+        # 1. Validation: check ownership across all devices
+        for device in devices:
+            if device in POOL.active_locks:
+                current_owner = POOL.active_locks[device].get("client_id")
+
+                # if devices current_owner is someone else -> abort
+                if current_owner != client_id:
+                    print(f"    -> [DENIED] '{client_id}' tried to unlock '{device}', but it belongs to '{current_owner}'!")
+                    return web.json_response({"status": "rejected", "message": f"Device '{device}' is locked by '{current_owner}'. You cannot unlock it."}, status=403)
+
+        # 2. Processing: release devices if validation was successful
+        events_to_trigger = set()
+
+        for device in devices:
+            if device in POOL.active_locks:
+                meta = POOL.active_locks.pop(device)
+                print(f"[SERVER] Freed: '{device}' is free again.")
+
+                # get event of holding client
+                lock_ev = meta.get("unlock_event")
+                if lock_ev:
+                    events_to_trigger.add(lock_ev)
+
+            for ev in events_to_trigger:
+                ev.set()
+
+        POOL.trigger_global_cascade_wakeup()
+
+    return web.json_response({"status": "unlocked", "devices": devices})
 
 async def handle_status(request):
     # Function for showing which devices are locked by which user & since when
     # Shows a CLI-Dashboard with locked devices & their (if existing) queues
-    pass
+    print(f"[SERVER] Global status dashboard request received. Preparing data ...")
+
+    POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
+
+    safe_active_locks = {}
+    for device, meta in POOL.active_locks.items():
+        if isinstance(meta, dict):
+            raw_uuid = meta.get("client_id", "")
+
+            if len(raw_uuid) > 9 and raw_uuid[-9] == "_":
+                clean_name = raw_uuid[:-9]
+            else:
+                clean_name = raw_uuid
+
+            safe_active_locks[device] = {"device": meta.get("device"), "client_id": clean_name, "timestamp": meta.get("timestamp")}
+
+    status_report = {
+        "active_locks": safe_active_locks,
+        "queues": {}
+    }
+
+    for device in list(POOL.device_queues.keys()):
+        waiters = POOL.get_queue_waiters(device)
+        if waiters:
+            status_report["queues"][device] = waiters
+
+    return web.json_response(status_report)
 
 
 if __name__ == "__main__":
