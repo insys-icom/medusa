@@ -195,8 +195,182 @@ async def handle_force_unlock(request):
     return web.json_response({"status": "force_unlock_complete", "device": device })
 
 async def handle_lock(request):
-    # Function for locking devices / dependencies
-    pass
+    # Function for locking devices / dependencies according to "all or nothing"-principle
+    # 1. PAYLOAD PARSING & VALIDATION
+    try:
+        body = await request.json()
+        devices = body.get("devices", [])
+        client_id = body.get("client_id")
+    except Exception:
+        return web.json_response({"status": "error", "message": "Malformed JSON payload"}, status=400)
+
+    if not devices or not client_id:
+        return web.json_response({"status": "error", "message": "Missing devices or client_id fields"}, status=400)
+
+    # Generate unique session-id
+    session_uuid = f"{client_id}_{uuid.uuid4().hex[:8]}"
+
+    # Preventive cleanup: Prevents orphaned locks from blocking the system
+    POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
+
+    active_lock_event = None
+
+    # 2. IMMEDIATE AVAILABILITY CHECK
+    try:
+        async with POOL.server_mutex:
+            print(f"[SERVER] Request for locking batch '{devices}' received from '{client_id}'. Checking status ...")
+            all_free_and_no_waiters = True
+
+            for device in devices:
+                is_busy = device in POOL.active_locks
+                queue = POOL.get_or_create_queue(device)
+
+                # Is queue empty or is client next in line?
+                if not queue.empty():
+                    first_in_line_id = queue._queue[0][0]       # Get client_id from 3-Tuple
+                    has_prior_waiter = (first_in_line_id != session_uuid)
+                else:
+                    has_prior_waiter = False
+
+                if is_busy or has_prior_waiter:
+                    all_free_and_no_waiters = False
+
+            # Case A: All devices are free -> lets go!
+            if all_free_and_no_waiters:
+                # Creating a local event ONLY for this active lock to freeze the connection
+                active_lock_event = asyncio.Event()
+
+                for device in devices:
+                    POOL.active_locks[device] = {"device": device, "client_id": session_uuid, "timestamp": time.time(), "unlock_event": active_lock_event}
+                    print(f"[SERVER] Hardware '{device}' locked by '{client_id}' successfully.")
+
+        # 3. QUEUE-LOGIC
+        # Case B: At least one device is busy -> Don't lock any of the free devices
+        if active_lock_event is None:
+            print(f"    -> Some devices in {devices} are busy. Put client '{client_id}' into queue ...")
+            my_turn_event = asyncio.Event()         # local waiting-event only for this specific client
+            queue_entry_time = time.time()
+
+            async with POOL.server_mutex:
+                # Client joins queue for every device it requested
+                # As soon as the last requested device becomes available, it's woken up
+                for device in devices:
+                    queue = POOL.get_or_create_queue(device)
+                    await queue.put((session_uuid, my_turn_event, queue_entry_time))
+                    print(f"[SERVER-RESERVATION] '{client_id}'  was inserted in the queue for '{device}'.")
+
+            # HTTP-Connection freezes in long-polling
+            while True:
+                try:
+                    # Client waits without blocking something until ANYONE of its requested devices is freed
+                    await asyncio.wait_for(my_turn_event.wait(), timeout=2.0)
+                    my_turn_event.clear()       # reset alarm for next round
+                    print(f"[SERVER] A queue event fired for '{client_id}'! Checking total batch availability for {devices}...")
+
+                except asyncio.TimeoutError:
+                    connection_dead = False     # Client here or has lost connection?
+
+                    if request.transport is None or request.transport.is_closing():    # request.transport shows state of connection
+                        connection_dead = True
+                    if hasattr(request, 'task') and request.task.cancelled():
+                        connection_dead = True
+                    if connection_dead:
+                        print(f"\n[NETWORK-GUARD] Client '{client_id}' has lost connection (Ctrl+C or Crash)!")
+                        raise asyncio.CancelledError        # To start cleanup-block
+
+                    # If client currently has connection: wait another 2 seconds
+                    continue
+
+                # Temporary check release from queues
+                async with POOL.server_mutex:
+                    all_conditions_met = True
+
+                    for device in devices:
+                        is_busy = device in POOL.active_locks
+                        queue = POOL.get_or_create_queue(device)
+
+                        if not queue.empty():
+                            first_id = queue._queue[0][0]
+                            is_my_turn = (first_id == session_uuid)
+                        else:
+                            is_my_turn = True
+
+                        if is_busy or not is_my_turn:
+                            all_conditions_met = False
+                            break
+
+                    if all_conditions_met:           # Every device is free
+                        active_lock_event = asyncio.Event()
+
+                        for device in devices:
+                            queue = POOL.get_or_create_queue(device)
+                            new_queue_items = []        # Queue without our own item
+
+                            while not queue.empty():
+                                item = queue.get_nowait()
+
+                                if isinstance(item, (tuple, list)) and len(item) == 3:
+                                    if item[0] != session_uuid:
+                                        new_queue_items.append(item)
+                                else:
+                                    if item != session_uuid:
+                                        new_queue_items.append(item)
+
+                            for item in new_queue_items:
+                                queue.put_nowait(item)
+
+                            POOL.active_locks[device] = {"device": device, "client_id": session_uuid, "timestamp": time.time(), "unlock_event": active_lock_event}
+
+                        print(f"[SERVER] SUCCESS: Batch {devices} locked by '{client_id}' successfully after waiting.")
+                        break
+                    else:
+                        print(f"    -> Batch {devices} for '{client_id}' still blocked. Defending priority position...")
+
+        # 4. ACTIVE LOCK-GUARD / NETWORK-GUARD
+        while True:
+            try:
+                await asyncio.wait_for(active_lock_event.wait(), timeout=2.0)
+            except asyncio.TimeoutError:
+                connection_dead = False
+
+                if request.transport is None or request.transport.is_closing():
+                    connection_dead = True
+                if hasattr(request, 'task') and request.task.cancelled():
+                    connection_dead = True
+                if connection_dead:
+                    print(f"\n[NETWORK-GUARD] Active lock holder '{client_id}' dropped connection!")
+                    raise asyncio.CancelledError
+                continue
+
+            # Event fired -> /unlock or /force_unlock
+            if active_lock_event.is_set():
+                async with POOL.server_mutex:
+                    still_owned_count = 0
+
+                    for device in devices:
+                        if device in POOL.active_locks and POOL.active_locks[device].get("client_id") == session_uuid:
+                            still_owned_count += 1
+
+                    if still_owned_count == 0:
+                        # Case A: We own nothing anymore -> close connection
+                        print(f"[SERVER] Client '{client_id}' holding no remaining locks. Closing connection cleanly.")
+                        break
+                    else:
+                        # Case B: We own some devices
+                        active_lock_event.clear()
+                        print(f"    -> [PARTIAL-EVICTION] '{client_id}' lost some locks, but keeps holding connection for {still_owned_count} remaining devices.")
+                        continue
+
+        return web.json_response({"status": "locked", "devices": devices})
+
+    # 5. AUTOMATIC CLEANUP WHEN ABORT / CRASH
+    except asyncio.CancelledError:      # Client lost connection to server (Ctrl+C)
+        async with POOL.server_mutex:
+            print(f"\n[DISCONNECT PROTECTION] Client socket connection severed for '{client_id}'!")
+            POOL.remove_client_from_all_queues(session_uuid)
+            POOL.release_all_locks_for_client(session_uuid)
+            POOL.trigger_cascade_wakeup()
+        raise
 
 async def handle_unlock(request):
     # Function for unlocking currently locked devices / dependencies
