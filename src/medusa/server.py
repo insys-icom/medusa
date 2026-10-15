@@ -147,7 +147,52 @@ POOL = DepLockManager()
 
 async def handle_force_unlock(request):
     # If a user chrashed, the server is still able to unlock their holded locks
-    pass
+    # Security Check: Is requester = admin?
+    ADMIN_TOKEN = "INSYS_ADMIN_2026"
+    client_token = request.headers.get("X-Admin-Token")
+
+    if client_token != ADMIN_TOKEN:
+        print(f"[SECURITY ALERT] Unauthorized attempt to FORCE_UNLOCK by '{client_token}'!")
+        return web.json_response({"status": "error", "message": "Unauthorised attempt to force unlock devices."})
+
+    # PAYLOAD PARSING & VALIDATION
+    try:
+        body = await request.json()
+        devices = body.get("devices", [])
+        reason = body.get("reason", "Manual admin intervention")
+    except Exception:
+        return web.json_response({"status": "error", "message": "Malformed JSON payload"}, status=400)
+
+    if not devices:
+        return web.json_response({"status": "error", "message": "Missing devices field"}, status=400)
+
+    POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
+
+    async with POOL.server_mutex:
+        print(f"\n[ADMIN-ACTION] FORCE_UNLOCK triggered for {devices}.")
+
+        events_to_trigger = set()
+
+        for device in devices:
+            if device in POOL.active_locks:
+                meta = POOL.active_locks.pop(device)
+                if isinstance(meta, dict):
+                    old_owner = meta.get("client_id")
+                    print(f"    -> Successfully evicted client '{old_owner}' from hardware '{device}'.")
+
+                    # if old_owner is online -> stop connection securely
+                    lock_ev = meta.get("unlock_event")
+                    if lock_ev:
+                        events_to_trigger.add(lock_ev)
+            else:
+                print(f"  -> Device '{device}' was not locked. Skipping eviction.")
+
+            for ev in events_to_trigger:
+                ev.set()
+
+        POOL.trigger_global_cascade_wakeup()
+
+    return web.json_response({"status": "force_unlock_complete", "device": device })
 
 async def handle_lock(request):
     # Function for locking devices / dependencies
