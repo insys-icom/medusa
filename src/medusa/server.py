@@ -460,5 +460,5 @@ if __name__ == "__main__":
         web.post('/unlock', handle_unlock),
         web.post('/force_unlock', handle_force_unlock)
     ])
-    print("Asynchronous queue-server auf http://127.0.0.1:8080 ...")
+    print("Medusa lock-server auf http://127.0.0.1:8080 ...")
     web.run_app(app, host='127.0.0.1', port=8080)

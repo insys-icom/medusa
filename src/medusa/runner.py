@@ -87,6 +87,39 @@ class DepManager:
         self.in_use.difference_update(deps_assigned)
 
 
+class ServerDepManager:
+    def __init__(self, stage:"Stage", server_url="http://127.0.0.1:8080"):
+        all_deps: set[str] = set(stage.deps_static_cnt).union(stage.deps_dynamic_cnt)
+        self.all = frozenset(all_deps)
+        self.available = set(all_deps)
+        self.in_use: set[str] = set()
+
+        self.server_url = server_url
+        self.active_connections = {}
+        self.user_name = os.getenv("USER", "medusa_runner")
+
+    def try_lock(self, suite: "Suite") -> bool:
+        deps_assigned = suite.try_assign_deps(self.available)
+        if deps_assigned is None:
+            return False
+
+        assert deps_assigned.issubset(self.all)
+        assert deps_assigned.issubset(self.available), (
+            f"assigned={deps_assigned}, available={self.available}, all={self.all}"
+        )
+        self.available.difference_update(deps_assigned)
+        self.in_use.update(deps_assigned)
+        return True
+
+    def free(self, suite: "Suite"):
+        deps_assigned = suite.deps
+        assert deps_assigned.issubset(self.all)
+        assert deps_assigned.issubset(self.in_use)
+
+        self.available.update(deps_assigned)
+        self.in_use.difference_update(deps_assigned)
+
+
 @dataclass
 class ProcessInfo:
     process: "multiprocessing.Process"
