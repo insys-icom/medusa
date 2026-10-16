@@ -3,8 +3,11 @@ import logging
 import multiprocessing
 import multiprocessing.connection
 import os
+import requests
 import signal
 import sys
+import threading
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -93,32 +96,126 @@ class ServerDepManager:
         self.all = frozenset(all_deps)
         self.available = set(all_deps)
         self.in_use: set[str] = set()
-
+        self.pending_locks = {}
+        self._state_lock = threading.Lock()
         self.server_url = server_url
-        self.active_connections = {}
         self.user_name = os.getenv("USER", "medusa_runner")
 
+        # maps a suite to the session_uuid for active connections to server
+        self.active_connections = {}
+
     def try_lock(self, suite: "Suite") -> bool:
+        # Attempt to lock the suite's dependencies on the locking server
+
         deps_assigned = suite.try_assign_deps(self.available)
         if deps_assigned is None:
             return False
 
         assert deps_assigned.issubset(self.all)
         assert deps_assigned.issubset(self.available), (
-            f"assigned={deps_assigned}, available={self.available}, all={self.all}"
+            f"assigned={deps_assigned}, "
+            f"available={self.available}, "
+            f"all={self.all}"
         )
+
+        payload = {
+            "devices": list(deps_assigned),
+            "client_id": self.user_name
+        }
+
+        try:
+            response = requests.post(
+                f"{self.server_url}/lock",
+                json=payload,
+                timeout=None
+            )
+        except requests.RequestException as exc:
+            print(f"[SERVER-DEPMRG] Lock request failed: {exc}")
+            return False
+
+        if response.status_code != 200:
+            print(f"[SERVER-DEPMRG] Server rejected lock request: "
+                  f"{response.status_code} {response.text}")
+            return False
+
+        try:
+            data = response.json()
+        except ValueError:
+            print(f"[SERVER-DEPMRG] Server returned invalid JSON: {response.text}")
+            return False
+
+        if data.get("status") != "locked":
+            print(f"[SERVER-DEPMGR] Unexpected lock response: {data}")
+            return False
+
+        session_uuid = data["session_uuid"]
+
+        # Server successfully owns the dependency now
         self.available.difference_update(deps_assigned)
         self.in_use.update(deps_assigned)
+
+        stop_event = threading.Event()
+        watch_thread = threading.Thread(target=self._watch_session, args=(session_uuid, stop_event), daemon=True)
+        watch_thread.start()
+        self.active_connections[suite] = {"session_uuid": session_uuid, "stop_event": stop_event, "watch_thread": watch_thread}
+
         return True
 
     def free(self, suite: "Suite"):
+        # Attempts to free the suite's dependencies on the locking server
+
         deps_assigned = suite.deps
+
         assert deps_assigned.issubset(self.all)
         assert deps_assigned.issubset(self.in_use)
+
+        connection = self.active_connections.pop(suite)
+        session_uuid = connection["session_uuid"]
+        if session_uuid is None:
+            print(f"[SERVER-DEPMRG] No session UUID found for suite '{suite}'.")
+            return
+
+        payload = {
+            "devices": list(deps_assigned),
+            "client_id": session_uuid
+        }
+
+        try:
+            response = requests.post(
+                f"{self.server_url}/unlock",
+                json=payload,
+                timeout=None
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            print(f"[SERVER-DEPMGR] Unlock request failed: {exc}")
+            return
+
+        if response.status_code != 200:
+            print(f"[SERVER-DEPMGR] Server rejected unlock request: "
+                  f"{response.status_code} {response.text}")
+            return
+
+        try:
+            data = response.json()
+        except ValueError:
+            print(f"[SERVER-DEPMRG] Server returned invalid JSON: {response.text}")
+            return
+
+        if data.get("status") != "unlocked":
+            print(f"[DERVER-DEPMGR] Unexpected unlock response: {data}")
+            return
 
         self.available.update(deps_assigned)
         self.in_use.difference_update(deps_assigned)
 
+        print(f"[SERVER-DEPMGR] Unlocked {deps_assigned} with session '{session_uuid}'.")
+
+    def _watch_session(self, session_uuid, stop_event):
+        try:
+            requests.post(f"{self.server_url}/watch", json={"session_uuid": session_uuid}, timeout=None)
+        except requests.RequestException:
+            pass
 
 @dataclass
 class ProcessInfo:
@@ -255,7 +352,7 @@ class Runner:
     def __init__(self, settings: "Settings", stage: "Stage"):
         self.stage = stage
 
-        self.depmgr = DepManager(stage)
+        self.depmgr = ServerDepManager(stage)
         self.procmgr = ProcessManager(settings)
 
         if sys.stdout.isatty() and settings.log_level == logging.WARNING:

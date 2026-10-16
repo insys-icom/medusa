@@ -194,8 +194,50 @@ async def handle_force_unlock(request):
 
     return web.json_response({"status": "force_unlock_complete", "device": device })
 
+async def handle_watch(request):
+    # Function to keep connection to client open while its session owns locks
+    session_uuid = None
+    try:
+        body = await request.json()
+        session_uuid = body.get("session_uuid")
+        if not session_uuid:
+            return web.json_response({"status": "error", "message": "Missing session_uuid"}, status=400)
+        print(f"[SERVER] Watchdog connection established for session '{session_uuid}'.")
+
+        while True:
+            # Check whether this session still owns any locks.
+            async with POOL.server_mutex:
+                still_owns_locks = any(meta.get("client_id") == session_uuid for meta in POOL.active_locks.values())
+
+             # The session was released normally, i.e. through /unlock.
+            if not still_owns_locks:
+                print(f"[SERVER] Watchdog session '{session_uuid}' has no remaining locks. Closing normally.")
+                return web.json_response({"status": "released", "session_uuid": session_uuid})
+
+            # Locks still exist: check whether the client disconnected.
+            if request.transport is None or request.transport.is_closing():
+                print(f"[NETWORK-GUARD] Watchdog connection lost for session '{session_uuid}'.")
+                raise asyncio.CancelledError
+            await asyncio.sleep(2)
+    except asyncio.CancelledError:
+        if session_uuid is not None:
+            async with POOL.server_mutex:
+                # Recheck ownership to avoid duplicate cleanup if an
+                # unlock happened just as the connection was cancelled.
+                still_owns_locks = any(meta.get("client_id") == session_uuid for meta in POOL.active_locks.values())
+
+                if still_owns_locks:
+                    print(f"[DISCONNECT PROTECTION] Releasing locks for session '{session_uuid}'.")
+                    POOL.remove_client_from_all_queues(session_uuid)
+                    POOL.release_all_locks_for_client(session_uuid)
+                    POOL.trigger_cascade_wakeup()
+                else:
+                    print(f"[SERVER] Session '{session_uuid}' already released its locks.")
+            raise
+
 async def handle_lock(request):
-    # Function for locking devices / dependencies according to "all or nothing"-principle
+    # Function for locking dependencies according to "all or nothing"-principle
+
     # 1. PAYLOAD PARSING & VALIDATION
     try:
         body = await request.json()
@@ -205,7 +247,7 @@ async def handle_lock(request):
         return web.json_response({"status": "error", "message": "Malformed JSON payload"}, status=400)
 
     if not devices or not client_id:
-        return web.json_response({"status": "error", "message": "Missing devices or client_id fields"}, status=400)
+        return web.json_response({"status": "error", "message": "Missing devices, client_id or session_uuid fields"}, status=400)
 
     # Generate unique session-id
     session_uuid = f"{client_id}_{uuid.uuid4().hex[:8]}"
@@ -299,71 +341,38 @@ async def handle_lock(request):
                             all_conditions_met = False
                             break
 
-                    if all_conditions_met:           # Every device is free
-                        active_lock_event = asyncio.Event()
-
-                        for device in devices:
-                            queue = POOL.get_or_create_queue(device)
-                            new_queue_items = []        # Queue without our own item
-
-                            while not queue.empty():
-                                item = queue.get_nowait()
-
-                                if isinstance(item, (tuple, list)) and len(item) == 3:
-                                    if item[0] != session_uuid:
-                                        new_queue_items.append(item)
-                                else:
-                                    if item != session_uuid:
-                                        new_queue_items.append(item)
-
-                            for item in new_queue_items:
-                                queue.put_nowait(item)
-
-                            POOL.active_locks[device] = {"device": device, "client_id": session_uuid, "timestamp": time.time(), "unlock_event": active_lock_event}
-
-                        print(f"[SERVER] SUCCESS: Batch {devices} locked by '{client_id}' successfully after waiting.")
-                        break
-                    else:
-                        print(f"    -> Batch {devices} for '{client_id}' still blocked. Defending priority position...")
-
-        # 4. ACTIVE LOCK-GUARD / NETWORK-GUARD
-        while True:
-            try:
-                await asyncio.wait_for(active_lock_event.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                connection_dead = False
-
-                if request.transport is None or request.transport.is_closing():
-                    connection_dead = True
-                if hasattr(request, 'task') and request.task.cancelled():
-                    connection_dead = True
-                if connection_dead:
-                    print(f"\n[NETWORK-GUARD] Active lock holder '{client_id}' dropped connection!")
-                    raise asyncio.CancelledError
-                continue
-
-            # Event fired -> /unlock or /force_unlock
-            if active_lock_event.is_set():
-                async with POOL.server_mutex:
-                    still_owned_count = 0
-
-                    for device in devices:
-                        if device in POOL.active_locks and POOL.active_locks[device].get("client_id") == session_uuid:
-                            still_owned_count += 1
-
-                    if still_owned_count == 0:
-                        # Case A: We own nothing anymore -> close connection
-                        print(f"[SERVER] Client '{client_id}' holding no remaining locks. Closing connection cleanly.")
-                        break
-                    else:
-                        # Case B: We own some devices
-                        active_lock_event.clear()
-                        print(f"    -> [PARTIAL-EVICTION] '{client_id}' lost some locks, but keeps holding connection for {still_owned_count} remaining devices.")
+                    if not all_conditions_met:
+                        print(f"    -> Batch {devices} for '{client_id}' still blocked.Defending priority position ...")
                         continue
 
-        return web.json_response({"status": "locked", "devices": devices})
+                    # Every device is free & our turn now
+                    active_lock_event = asyncio.Event()
 
-    # 5. AUTOMATIC CLEANUP WHEN ABORT / CRASH
+                    for device in devices:
+                        queue = POOL.get_or_create_queue(device)
+                        new_queue_items = []        # Queue without our own item
+
+                        while not queue.empty():
+                            item = queue.get_nowait()
+
+                            if isinstance(item, (tuple, list)) and len(item) == 3:
+                                if item[0] != session_uuid:
+                                    new_queue_items.append(item)
+                            else:
+                                if item != session_uuid:
+                                    new_queue_items.append(item)
+
+                        for item in new_queue_items:
+                            queue.put_nowait(item)
+
+                        POOL.active_locks[device] = {"device": device, "client_id": session_uuid, "timestamp": time.time(), "unlock_event": active_lock_event}
+
+                    print(f"[SERVER] SUCCESS: Batch {devices} locked by '{client_id}' successfully after waiting.")
+                    break
+
+        return web.json_response({"status": "locked", "devices": devices, "session_uuid": session_uuid})
+
+    # 4. AUTOMATIC CLEANUP WHEN ABORT / CRASH
     except asyncio.CancelledError:      # Client lost connection to server (Ctrl+C)
         async with POOL.server_mutex:
             print(f"\n[DISCONNECT PROTECTION] Client socket connection severed for '{client_id}'!")
@@ -416,7 +425,7 @@ async def handle_unlock(request):
             for ev in events_to_trigger:
                 ev.set()
 
-        POOL.trigger_global_cascade_wakeup()
+        POOL.trigger_cascade_wakeup()
 
     return web.json_response({"status": "unlocked", "devices": devices})
 
@@ -458,7 +467,8 @@ if __name__ == "__main__":
         web.get('/status', handle_status),
         web.post('/lock', handle_lock),
         web.post('/unlock', handle_unlock),
-        web.post('/force_unlock', handle_force_unlock)
+        web.post('/force_unlock', handle_force_unlock),
+        web.post('/watch', handle_watch)
     ])
     print("Medusa lock-server auf http://127.0.0.1:8080 ...")
     web.run_app(app, host='127.0.0.1', port=8080)
