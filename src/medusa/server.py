@@ -153,7 +153,9 @@ async def handle_force_unlock(request):
 
     if client_token != ADMIN_TOKEN:
         print(f"[SECURITY ALERT] Unauthorized attempt to FORCE_UNLOCK by '{client_token}'!")
-        return web.json_response({"status": "error", "message": "Unauthorised attempt to force unlock devices."})
+        return web.json_response({
+            "status": "error",
+            "message": "Unauthorised attempt to force unlock devices."})
 
     # PAYLOAD PARSING & VALIDATION
     try:
@@ -161,10 +163,16 @@ async def handle_force_unlock(request):
         devices = body.get("devices", [])
         reason = body.get("reason", "Manual admin intervention")
     except Exception:
-        return web.json_response({"status": "error", "message": "Malformed JSON payload"}, status=400)
+        return web.json_response({
+            "status": "error",
+            "message": "Malformed JSON payload"},
+            status=400)
 
     if not devices:
-        return web.json_response({"status": "error", "message": "Missing devices field"}, status=400)
+        return web.json_response({
+            "status": "error",
+            "message": "Missing devices field"},
+            status=400)
 
     POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
 
@@ -192,7 +200,9 @@ async def handle_force_unlock(request):
 
         POOL.trigger_global_cascade_wakeup()
 
-    return web.json_response({"status": "force_unlock_complete", "device": device })
+    return web.json_response({
+        "status": "force_unlock_complete",
+        "device": device })
 
 async def handle_watch(request):
     # Function to keep connection to client open while its session owns locks
@@ -244,10 +254,16 @@ async def handle_lock(request):
         devices = body.get("devices", [])
         client_id = body.get("client_id")
     except Exception:
-        return web.json_response({"status": "error", "message": "Malformed JSON payload"}, status=400)
+        return web.json_response({
+            "status": "error",
+            "message": "Malformed JSON payload"},
+            status=400)
 
     if not devices or not client_id:
-        return web.json_response({"status": "error", "message": "Missing devices, client_id or session_uuid fields"}, status=400)
+        return web.json_response({
+            "status": "error",
+            "message": "Missing devices, client_id or session_uuid fields"},
+            status=400)
 
     # Generate unique session-id
     session_uuid = f"{client_id}_{uuid.uuid4().hex[:8]}"
@@ -370,7 +386,10 @@ async def handle_lock(request):
                     print(f"[SERVER] SUCCESS: Batch {devices} locked by '{client_id}' successfully after waiting.")
                     break
 
-        return web.json_response({"status": "locked", "devices": devices, "session_uuid": session_uuid})
+        return web.json_response({
+            "status": "locked",
+            "devices": devices,
+            "session_uuid": session_uuid})
 
     # 4. AUTOMATIC CLEANUP WHEN ABORT / CRASH
     except asyncio.CancelledError:      # Client lost connection to server (Ctrl+C)
@@ -389,10 +408,16 @@ async def handle_unlock(request):
         devices = list(set(body.get("devices", [])))
         client_id = body.get("client_id")
     except Exception:
-        return web.json_response({"status": "error", "message": "Malformed JSON payload"}, status=400)
+        return web.json_response({
+            "status": "error",
+            "message": "Malformed JSON payload"},
+            status=400)
 
     if not devices or not client_id:
-        return web.json_response({"status": "error", "message": "Missing devices or client_id fields"}, status=400)
+        return web.json_response({
+            "status": "error",
+            "message": "Missing devices or client_id fields"},
+            status=400)
 
     POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
 
@@ -407,7 +432,10 @@ async def handle_unlock(request):
                 # if devices current_owner is someone else -> abort
                 if current_owner != client_id:
                     print(f"    -> [DENIED] '{client_id}' tried to unlock '{device}', but it belongs to '{current_owner}'!")
-                    return web.json_response({"status": "rejected", "message": f"Device '{device}' is locked by '{current_owner}'. You cannot unlock it."}, status=403)
+                    return web.json_response({
+                        "status": "rejected",
+                        "message": f"Device '{device}' is locked by '{current_owner}'. You cannot unlock it."},
+                        status=403)
 
         # 2. Processing: release devices if validation was successful
         events_to_trigger = set()
@@ -427,7 +455,9 @@ async def handle_unlock(request):
 
         POOL.trigger_cascade_wakeup()
 
-    return web.json_response({"status": "unlocked", "devices": devices})
+    return web.json_response({
+        "status": "unlocked",
+        "devices": devices})
 
 async def handle_status(request):
     # Function for showing which devices are locked by which user & since when
@@ -446,7 +476,9 @@ async def handle_status(request):
             else:
                 clean_name = raw_uuid
 
-            safe_active_locks[device] = {"device": meta.get("device"), "client_id": clean_name, "timestamp": meta.get("timestamp")}
+            safe_active_locks[device] = {"device": meta.get("device"),
+                                         "client_id": clean_name,
+                                         "timestamp": meta.get("timestamp")}
 
     status_report = {
         "active_locks": safe_active_locks,
