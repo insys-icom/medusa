@@ -426,7 +426,6 @@ async def handle_lock(request):
                 await asyncio.wait_for(active_lock_event.wait(), timeout=0.2)
             except asyncio.TimeoutError:
                 if request.transport is None or request.transport.is_closing():
-                    print(f"[SESSION-END] Client connection closed for '{session_uuid}'. Releasing remaining locks.")
                     raise asyncio.CancelledError
 
                 # Small heartbeat helps detect a closed client connection
