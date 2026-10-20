@@ -1,4 +1,5 @@
 import datetime
+import json
 import logging
 import multiprocessing
 import multiprocessing.connection
@@ -7,7 +8,7 @@ import requests
 import signal
 import sys
 import threading
-import uuid
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -105,111 +106,139 @@ class ServerDepManager:
         self.active_connections = {}
 
     def try_lock(self, suite: "Suite") -> bool:
-        # Attempt to lock the suite's dependencies on the locking server
+        # Ask server to lock & assign the suite's dependencies
 
-        deps_assigned = suite.try_assign_deps(self.available)
-        if deps_assigned is None:
+        # Do not create another lock session for an already locked suite
+        if suite in self.active_connections:
             return False
 
-        assert deps_assigned.issubset(self.all)
-        assert deps_assigned.issubset(self.available), (
-            f"assigned={deps_assigned}, "
-            f"available={self.available}, "
-            f"all={self.all}"
-        )
-
         payload = {
-            "devices": list(deps_assigned),
-            "client_id": self.user_name
+            "client_id": self.user_name,
+            "deps_static": sorted(suite.deps_static),
+            "deps_dynamic": {name: sorted(dyn.options)
+                             for name, dyn in suite.deps_dynamic.items()}
         }
 
         try:
             response = requests.post(
                 f"{self.server_url}/lock",
                 json=payload,
-                timeout=None
+                stream=True,
+                timeout=(5, 10)
             )
+            print(f"[DEBUG] HTTP response received: {response.status_code}", flush=True)
         except requests.RequestException as exc:
             print(f"[SERVER-DEPMRG] Lock request failed: {exc}")
             return False
 
-        if response.status_code != 200:
-            print(f"[SERVER-DEPMRG] Server rejected lock request: "
-                  f"{response.status_code} {response.text}")
+        # Server immediately rejects unavailable dependencies
+        if response.status_code == 409:
+            response.close()
             return False
+
+        if response.status_code != 200:
+            print(f"[SERVER-DEPMRG] Lock request failed: {response.status_code} {response.text}")
+            response.close()
+            return False
+
+        # Debug-Block
+        print("[DEBUG] Waiting for lock confirmation...", flush=True)
+        line_iterator = response.iter_lines(chunk_size=1, decode_unicode=True)
+        data = None
+        for line in line_iterator:
+            print(f"[DEBUG] Received stream line: {line!r}", flush=True)
+            if not line.strip():
+                continue
+            data = json.loads(line)
+            break
+        if data is None:
+            response.close()
+            print(f"[DEBUG] Stream ended without confirmation.", flush=True)
+            return False
+        print(f"[DEBUG] Parsed confirmation: {data}", flush=True)
 
         try:
-            data = response.json()
-        except ValueError:
-            print(f"[SERVER-DEPMRG] Server returned invalid JSON: {response.text}")
+            # first_line = next((line for line in line_iterator if line.strip()), None)
+            # if first_line is None:
+            #     raise ValueError("Server closed the stream without confirmation")
+
+            # data = response.json()
+            if data.get("status") != "locked":
+                raise ValueError(f"Unexpected lock response: {data}")
+
+            session_uuid = data.get("session_uuid")
+            assigned_dynamic = data.get("deps_assigned")
+            devices_raw = data.get("devices")
+
+            if (not isinstance(session_uuid, str)
+                or not session_uuid
+                or not isinstance(assigned_dynamic, dict)
+                or not isinstance(devices_raw, list)
+                or any(not isinstance(device, str) for device in devices_raw)
+            ):
+                raise ValueError("Invalid lock confirmation fields")
+
+            # Verify that server has assigned every dynamic dependency
+            if set(assigned_dynamic) != set(suite.deps_dynamic):
+                raise ValueError("Dynamic dependency assignments do not match")
+
+            for name, device in assigned_dynamic.items():
+                if(not isinstance(device, str) or device not in suite.deps_dynamic[name].options):
+                    raise ValueError(f"Invalid assignment for dynamic dependency '{name}'")
+
+            concrete_devices = set(devices_raw)
+            expected_devices = set(suite.deps_static | set(assigned_dynamic.values()))
+
+            if concrete_devices != expected_devices:
+                raise ValueError("Server's device list does not match its assignments")
+
+            if not concrete_devices.issubset(self.all):
+                raise ValueError("Server assogmed a device outside this stage's dependencies")
+
+        except (ValueError, TypeError) as exc:
+            # Closing the stream tells server to clean up this session
+            response.close()
+            print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
             return False
 
-        if data.get("status") != "locked":
-            print(f"[SERVER-DEPMGR] Unexpected lock response: {data}")
-            return False
+        # Apply servers dynamic assignements to the suite
+        for name, device in assigned_dynamic.items():
+            suite.deps_dynamic[name].value = device
 
-        session_uuid = data["session_uuid"]
+        # Keep medusas local local bookkeeping in sync
+        self.available.difference_update(concrete_devices)
+        self.in_use.update(concrete_devices)
 
-        # Server successfully owns the dependency now
-        self.available.difference_update(deps_assigned)
-        self.in_use.update(deps_assigned)
+        # Retain the open response for free(suite)
+        self.active_connections[suite] = {
+            "session_uuid": session_uuid,
+            "devices": concrete_devices,
+            "response": response,
+            "line_iterator": line_iterator
+        }
 
-        stop_event = threading.Event()
-        watch_thread = threading.Thread(target=self._watch_session, args=(session_uuid, stop_event), daemon=True)
-        watch_thread.start()
-        self.active_connections[suite] = {"session_uuid": session_uuid, "stop_event": stop_event, "watch_thread": watch_thread}
-
+        print(f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} with session '{session_uuid}'.")
         return True
 
     def free(self, suite: "Suite"):
-        # Attempts to free the suite's dependencies on the locking server
+        # Release the suites dependencies & close lock connection
 
-        deps_assigned = suite.deps
+        connection = self.active_connections.pop(suite, None)
 
-        assert deps_assigned.issubset(self.all)
-        assert deps_assigned.issubset(self.in_use)
+        if connection is None:
+            print(f"[SERVER-DEPMGR] No active lock session found for '{suite}'.")
+            return
 
-        connection = self.active_connections.pop(suite)
+        devices = connection["devices"]
         session_uuid = connection["session_uuid"]
-        if session_uuid is None:
-            print(f"[SERVER-DEPMRG] No session UUID found for suite '{suite}'.")
-            return
-
-        payload = {
-            "devices": list(deps_assigned),
-            "client_id": session_uuid
-        }
 
         try:
-            response = requests.post(
-                f"{self.server_url}/unlock",
-                json=payload,
-                timeout=None
-            )
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            print(f"[SERVER-DEPMGR] Unlock request failed: {exc}")
-            return
+            connection["response"].close()      # ends session on server
+        finally:
+            self.available.update(devices)
+            self.in_use.difference_update(devices)
 
-        if response.status_code != 200:
-            print(f"[SERVER-DEPMGR] Server rejected unlock request: "
-                  f"{response.status_code} {response.text}")
-            return
-
-        try:
-            data = response.json()
-        except ValueError:
-            print(f"[SERVER-DEPMRG] Server returned invalid JSON: {response.text}")
-            return
-
-        if data.get("status") != "unlocked":
-            print(f"[DERVER-DEPMGR] Unexpected unlock response: {data}")
-            return
-
-        self.available.update(deps_assigned)
-        self.in_use.difference_update(deps_assigned)
-
-        print(f"[SERVER-DEPMGR] Unlocked {deps_assigned} with session '{session_uuid}'.")
+        print(f"[SERVER-DEPMGR] Released {sorted(devices)} from session '{session_uuid}'.")
 
     def _watch_session(self, session_uuid, stop_event):
         try:
@@ -427,6 +456,8 @@ class Runner:
 
             if change_happened:
                 self.print_status()
+            else:
+                time.sleep(0.1)     # to avoid too many requests
 
     def print_status(self):
         pending = self.stage.pending
