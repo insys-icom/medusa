@@ -170,6 +170,49 @@ class DepLockManager:
             for device, dep_name in option_owner.items()
         }
 
+    async def resolve_and_assign_dependencies(self, client_id: str, static_deps: set[str], dynamic_raw: dict[str, set[str]]):
+        async with self.server_mutex:
+            print(f"[SERVER] Request for locking received from '{client_id}': static={sorted(static_deps)}, dynamic={dynamic_raw}")
+
+            busy_deps = set(POOL.active_locks)
+            busy_static = static_deps & busy_deps
+
+            if busy_static:
+                unavailable_message = (f"Static dependencies are busy: {sorted(busy_static)}")
+                return {"status": "unavailable", "message": unavailable_message}
+
+            available_options = {name: options - busy_deps - static_deps
+                                for name, options in dynamic_raw.items()}
+
+            assigned_dynamic = POOL.resolve_dynamic_dependencies(available_options)
+
+            if assigned_dynamic is None:
+                unavailable_dependencies = [name
+                    for name, options in available_options.items()
+                    if not options]
+                unavailable_message = (f"No available devices for dynamic dependencies: {unavailable_dependencies}")
+                return {"status": "unavailable", "message": unavailable_message}
+
+            concrete_deps = (static_deps | set(assigned_dynamic.values()))
+
+            # All devices are free
+            session_uuid = (f"{client_id}_{uuid.uuid4().hex[:8]}")
+            active_lock_event = asyncio.Event()
+
+            for device in concrete_deps:
+                self. active_locks[device] = {"device": device,
+                                              "client_id": session_uuid,
+                                              "timestamp": time.time(),
+                                              "unlock_event": active_lock_event}
+
+            print(f"[SERVER] Lock granted to '{client_id}' for {sorted(concrete_deps)} (session {session_uuid}).")
+
+            return {"status": "locked",
+                    "session_uuid": session_uuid,
+                    "active_lock_event": active_lock_event,
+                    "assigned_dynamic": assigned_dynamic,
+                    "concrete_deps": concrete_deps}
+
     def trigger_cascade_wakeup(self):
         # Wakes up every waiting client in queue
         print(f"[SERVER-CASCADE] Triggering global wake-up for all pending clients.")
@@ -332,15 +375,11 @@ async def handle_watch(request):
 async def handle_lock(request):
     # Function for locking dependencies according to "all or nothing"-principle
 
-    session_uuid = None
-    active_lock_event = None
-
     # 1. Payload parsing & validation
     client_id, static_raw, dynamic_raw = await parse_lock_request(request)
 
-    # 2. Resolve dependencies
+    # 2. Prepare dependencies
     static_deps = set(static_raw)
-
     if len(static_deps) != len(static_raw):
         return web.json_response({
             "status": "error",
@@ -351,7 +390,6 @@ async def handle_lock(request):
         name: set(options) - static_deps
         for name, options in dynamic_raw.items()
     }
-
     if not static_deps and not dynamic_options:
         return web.json_response({
             "status": "error",
@@ -361,56 +399,21 @@ async def handle_lock(request):
     # 3. Preventive Cleanup: Prevents orphaned locks from blocking the system
     POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
 
-    unavailable_message = None
-    assigned_dynamic = None
-    concrete_devices = set()
-
-    # 4. Check Availability & assign dependencies
-    async with POOL.server_mutex:
-        print(f"[SERVER] Request for locking received from '{client_id}': static={sorted(static_deps)}, dynamic={dynamic_raw}")
-        busy_devices = set(POOL.active_locks)
-        busy_static = static_deps & busy_devices
-
-        if busy_static:
-            unavailable_message = (f"Static dependencies are busy: {sorted(busy_static)}")
-        else:
-            available_options = {name: options - busy_devices - static_deps
-                                for name, options in dynamic_options.items()}
-
-            assigned_dynamic = POOL.resolve_dynamic_dependencies(available_options)
-
-            if assigned_dynamic is None:
-                unavailable_message = ("No distinct set of available devices statisfies all dynamic dependencies.")
-            else:
-                concrete_devices= (static_deps | set(assigned_dynamic.values()))
-
-                # All devices are free
-                session_uuid = (f"{client_id}_{uuid.uuid4().hex[:8]}")
-                active_lock_event = asyncio.Event()
-
-                for device in concrete_devices:
-                    POOL. active_locks[device] = {
-                        "device": device,
-                        "client_id": session_uuid,
-                        "timestamp": time.time(),
-                        "unlock_event": active_lock_event
-                    }
-
-                print(f"[SERVER] Lock granted to '{client_id}' for {sorted(concrete_devices)} (session {session_uuid}).")
+    # 4. Check availability & assign dependencies
+    lock_data = await POOL.resolve_and_assign_dependencies(client_id, static_deps, dynamic_options)
 
     # 5. Unavailable: Return immediately without acquiring any locks
-    if unavailable_message is not None:
-        print(f"[SERVER] Request from '{client_id}' unavailable: {unavailable_message}")
-        return web.json_response({
-            "status": "unavailable",
-            "message": unavailable_message},
-            status=409)
+    if lock_data["status"] == "unavailable":
+        print(f"[SERVER] Some Dependencies from lock-request from '{client_id}' are unavailable.")
+        return web.json_response(lock_data, status=409)
 
-    assert session_uuid is not None
-    assert active_lock_event is not None
-    assert assigned_dynamic is not None
+    # 6. Get successful lock information
+    session_uuid = lock_data["session_uuid"]
+    active_lock_event = lock_data["active_lock_event"]
+    assigned_dynamic = lock_data["assigned_dynamic"]
+    concrete_deps = lock_data["concrete_deps"]
 
-    # 6. Stream confirmation, then keep this connection open
+    # 7. Stream confirmation, then keep this connection open
     stream = web.StreamResponse(status=200, headers={
         "Content-Type": "application/x-ndjson",
         "Cache-Control": "no-cache"})
@@ -420,7 +423,7 @@ async def handle_lock(request):
         confirmation = {
             "status": "locked",
             "session_uuid": session_uuid,
-            "devices": sorted(concrete_devices),
+            "devices": sorted(concrete_deps),
             "deps_assigned": assigned_dynamic
         }
         await stream.write((json.dumps(confirmation) + "\n").encode("utf-8"))
@@ -453,7 +456,7 @@ async def handle_lock(request):
         await stream.write_eof()
         return stream
 
-    # 7. CLEANUP WHEN CLIENT-CONNECTION ABORTED / CRASHED
+    # 8. CLEANUP WHEN CLIENT-CONNECTION ABORTED / CRASHED
     except asyncio.CancelledError:      # Client lost connection to server (Ctrl+C)
         print(f"[SESSION-END] Client connection closed for '{session_uuid}'. Releasing any remaining locks.")
         await POOL.cleanup_session(session_uuid)
