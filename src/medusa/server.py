@@ -182,6 +182,52 @@ class DepLockManager:
 
 POOL = DepLockManager()
 
+async def parse_lock_request(request_data):
+    try:
+        body = await request_data.json()
+        client_id = body.get("client_id")
+        static_raw = body.get("deps_static", [])
+        dynamic_raw = body.get("deps_dynamic", {})
+    except Exception:
+        return web.json_response({
+            "status": "error",
+            "message": "Malformed JSON payload"},
+            status=400)
+
+    if (not isinstance(client_id, str)
+        or not client_id
+        or not isinstance(static_raw, list)
+        or not isinstance(dynamic_raw, dict)
+    ):
+        return web.json_response({
+            "status": "error",
+            "message": "Missing / invalid request fields"},
+            status=400)
+
+    if (any(
+            not isinstance(device, str)
+            or not device
+            for device in static_raw
+        )
+        or any(
+            not isinstance(name, str)
+            or not name
+            or not isinstance(options, list)
+            or any(
+                not isinstance(device, str)
+                or not device
+                for device in options
+            )
+            for name, options in dynamic_raw.items()
+        )
+    ):
+        return web.json_response({
+            "status": "error",
+            "message": "Invalid dependency names or options"},
+            staus=400)
+
+    return client_id, static_raw, dynamic_raw
+
 
 async def handle_force_unlock(request):
     # If a user chrashed, the server is still able to unlock their holded locks
@@ -289,50 +335,10 @@ async def handle_lock(request):
     session_uuid = None
     active_lock_event = None
 
-    # 1. PAYLOAD PARSING & VALIDATION
-    try:
-        body = await request.json()
-        client_id = body.get("client_id")
-        static_raw = body.get("deps_static", [])
-        dynamic_raw = body.get("deps_dynamic", {})
-    except Exception:
-        return web.json_response({
-            "status": "error",
-            "message": "Malformed JSON payload"},
-            status=400)
+    # 1. Payload parsing & validation
+    client_id, static_raw, dynamic_raw = await parse_lock_request(request)
 
-    if (not isinstance(client_id, str)
-        or not client_id
-        or not isinstance(static_raw, list)
-        or not isinstance(dynamic_raw, dict)
-    ):
-        return web.json_response({
-            "status": "error",
-            "message": "Missing / invalid request fields"},
-            status=400)
-
-    if (any(
-            not isinstance(device, str)
-            or not device
-            for device in static_raw
-        )
-        or any(
-            not isinstance(name, str)
-            or not name
-            or not isinstance(options, list)
-            or any(
-                not isinstance(device, str)
-                or not device
-                for device in options
-            )
-            for name, options in dynamic_raw.items()
-        )
-    ):
-        return web.json_response({
-            "status": "error",
-            "message": "Invalid dependency names or options"},
-            staus=400)
-
+    # 2. Resolve dependencies
     static_deps = set(static_raw)
 
     if len(static_deps) != len(static_raw):
@@ -352,14 +358,14 @@ async def handle_lock(request):
             "message": "No dependencies supplied"},
             status=400)
 
-    # 2. PREVENTIVE CLEANUP: Prevents orphaned locks from blocking the system
+    # 3. Preventive Cleanup: Prevents orphaned locks from blocking the system
     POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
 
     unavailable_message = None
     assigned_dynamic = None
     concrete_devices = set()
 
-    # 3. CHECK AVAILABILITY AND ASSIGN DEPENDENCIES
+    # 4. Check Availability & assign dependencies
     async with POOL.server_mutex:
         print(f"[SERVER] Request for locking received from '{client_id}': static={sorted(static_deps)}, dynamic={dynamic_raw}")
         busy_devices = set(POOL.active_locks)
@@ -392,7 +398,7 @@ async def handle_lock(request):
 
                 print(f"[SERVER] Lock granted to '{client_id}' for {sorted(concrete_devices)} (session {session_uuid}).")
 
-    # 4. UNAVAILABLE: Return immediately without acquiring any locks
+    # 5. Unavailable: Return immediately without acquiring any locks
     if unavailable_message is not None:
         print(f"[SERVER] Request from '{client_id}' unavailable: {unavailable_message}")
         return web.json_response({
@@ -404,7 +410,7 @@ async def handle_lock(request):
     assert active_lock_event is not None
     assert assigned_dynamic is not None
 
-    # 5. Stream confirmation, then keep this connection open
+    # 6. Stream confirmation, then keep this connection open
     stream = web.StreamResponse(status=200, headers={
         "Content-Type": "application/x-ndjson",
         "Cache-Control": "no-cache"})
@@ -447,7 +453,7 @@ async def handle_lock(request):
         await stream.write_eof()
         return stream
 
-    # 6. CLEANUP WHEN CLIENT-CONNECTION ABORTED / CRASHED
+    # 7. CLEANUP WHEN CLIENT-CONNECTION ABORTED / CRASHED
     except asyncio.CancelledError:      # Client lost connection to server (Ctrl+C)
         print(f"[SESSION-END] Client connection closed for '{session_uuid}'. Releasing any remaining locks.")
         await POOL.cleanup_session(session_uuid)
