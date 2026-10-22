@@ -73,59 +73,58 @@ def unlock():
     depmgr.free(suite)
     print("free() finished")
 
-# def client_a(depmgr, suite):
-#     print("[A] Calling try_lock()...")
-#     result = depmgr.try_lock(suite)
-#     print(f"[A] try_lock() returned: {result}")
+def main0():
+    def client_a(depmgr, suite):
+        print("[A] Calling try_lock()...")
+        result = depmgr.try_lock(suite)
+        print(f"[A] try_lock() returned: {result}")
 
-#     if result:
-#         print("[A] Holding testm1 for 5 seconds...")
-#         time.sleep(5)
+        if result:
+            print("[A] Holding testm1 for 5 seconds...")
+            time.sleep(5)
 
-#         print("[A] Calling free()...")
-#         depmgr.free(suite)
-#         print("[A] free() finished")
+            print("[A] Calling free()...")
+            depmgr.free(suite)
+            print("[A] free() finished")
+
+    def client_b(depmgr, suite):
+        print("[B] Calling try_lock()...")
+        result = depmgr.try_lock(suite)
+        print(f"[B] try_lock() returned: {result}")
+
+        if result:
+            print("[B] Got testm1!")
+
+            print("[B] Calling free()...")
+            depmgr.free(suite)
+            print("[B] free() finished")
 
 
-# def client_b(depmgr, suite):
-#     print("[B] Calling try_lock()...")
-#     result = depmgr.try_lock(suite)
-#     print(f"[B] try_lock() returned: {result}")
+    stage_a = FakeStage({"testm1"})
+    stage_b = FakeStage({"testm1"})
+    depmgr_a = ServerDepManager(stage_a)
+    depmgr_b = ServerDepManager(stage_b)
+    suite_a = FakeSuite({"testm1"})
+    suite_b = FakeSuite({"testm1"})
+    thread_a = threading.Thread(target=client_a, args=(depmgr_a, suite_a))
+    thread_b = threading.Thread(target=client_b, args=(depmgr_b, suite_b))
+    print("=== Starting Client A ===")
+    thread_a.start()
+    time.sleep(1)
+    print("\n=== Starting Client B ===")
+    thread_b.start()
+    thread_a.join()
+    thread_b.join()
 
-#     if result:
-#         print("[B] Got testm1!")
+    print("\n=== FINAL STATE ===")
+    print("Suite deps:", suite.deps)
+    print("Available A:", depmgr_a.available)
+    print("In use A:", depmgr_a.in_use)
+    print("Available B:", depmgr_b.available)
+    print("In use B:", depmgr_b.in_use)
+    # print("Active connections:", depmgr.active_connections)
 
-#         print("[B] Calling free()...")
-#         depmgr.free(suite)
-#         print("[B] free() finished")
-
-
-# if __name__ == "__main__":
-#     stage_a = FakeStage({"testm1"})
-#     stage_b = FakeStage({"testm1"})
-#     depmgr_a = ServerDepManager(stage_a)
-#     depmgr_b = ServerDepManager(stage_b)
-#     suite_a = FakeSuite({"testm1"})
-#     suite_b = FakeSuite({"testm1"})
-#     thread_a = threading.Thread(target=client_a, args=(depmgr_a, suite_a))
-#     thread_b = threading.Thread(target=client_b, args=(depmgr_b, suite_b))
-#     print("=== Starting Client A ===")
-#     thread_a.start()
-#     time.sleep(1)
-#     print("\n=== Starting Client B ===")
-#     thread_b.start()
-#     thread_a.join()
-#     thread_b.join()
-
-#     print("\n=== FINAL STATE ===")
-#     print("Suite deps:", suite.deps)
-#     print("Available A:", depmgr_a.available)
-#     print("In use A:", depmgr_a.in_use)
-#     print("Available B:", depmgr_b.available)
-#     print("In use B:", depmgr_b.in_use)
-#     # print("Active connections:", depmgr.active_connections)
-
-def main():
+def main1():
     stage = FakeStage({"testm1", "testm4", "testm4_2", "m4_mrx2"})
     suite = FakeSuite({"testm1"})
     depmgr = ServerDepManager(stage, SERVER_URL)
@@ -213,6 +212,69 @@ def main():
         assert assignments["DUT_A"] != assignments["DUT_B"]
         depmgr.free(multiple_suite)
 
+def main2():
+    client_id = str(uuid.uuid4())
+
+    # Test /lock
+    response = requests.post("http://127.0.0.1:8080/lock",
+                                json={
+                                    "client_id": client_id,
+                                    "deps_static": ["testm1"],
+                                    "deps_dynamic": {}
+                                },
+                                timeout=5)
+    print("Status:", response.status_code)
+    print("Headers:", response.headers)
+    print("Body:", response.text)
+
+    # Test /status
+    response = requests.get("http://127.0.0.1:8080/status")
+    print("Status:", response.status_code)
+    print("Body:", response.text)
+
+    # Test /alive
+    response = requests.post("http://127.0.0.1:8080/alive", json={"client_id": client_id})
+    print(response.status_code)
+    print(response.text)
+
+    # Test /free
+    response = requests.post("http://127.0.0.1:8080/free", json={"client_id": client_id, "devices": ["testm1"]})
+    print(response.status_code)
+    print(response.text)
+
+    response = requests.get("http://127.0.0.1:8080/status")
+    print("Status:", response.status_code)
+    print("Body:", response.text)
+
+def main3():
+    client_id = str(uuid.uuid4())
+
+    # Test /lock
+    response = requests.post("http://127.0.0.1:8080/lock",
+                                json={
+                                    "client_id": client_id,
+                                    "deps_static": ["testm1"],
+                                    "deps_dynamic": {}
+                                },
+                                timeout=5)
+    print("Status:", response.status_code)
+    print("Headers:", response.headers)
+    print("Body:", response.text)
+
+    # Test /status before expiration
+    response = requests.get("http://127.0.0.1:8080/status")
+    print("Before expiration:")
+    print("Status:", response.status_code)
+    print("Body:", response.text)
+
+    # Wait until the client expires
+    time.sleep(6)
+
+    # Test /status before expiration
+    response = requests.get("http://127.0.0.1:8080/status")
+    print("After expiration:")
+    print("Status:", response.status_code)
+    print("Body:", response.text)
 
 if __name__ == "__main__":
-    main()
+    main3()

@@ -9,6 +9,7 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -97,23 +98,25 @@ class ServerDepManager:
         self.all = frozenset(all_deps)
         self.available = set(all_deps)
         self.in_use: set[str] = set()
+
         self.pending_locks = {}
         self._state_lock = threading.Lock()
-        self.server_url = server_url
-        self.user_name = os.getenv("USER", "medusa_runner")
 
-        # maps a suite to the session_uuid for active connections to server
-        self.active_connections = {}
+        self.server_url = server_url
+        self.client_id = str(uuid.uuid4())
+
+        self._keepalive_stop = threading.Event()
+        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
 
     def try_lock(self, suite: "Suite") -> bool:
         # Ask server to lock & assign the suite's dependencies
 
         # Do not create another lock session for an already locked suite
-        if suite in self.active_connections:
+        if suite in self.pending_locks:
             return False
 
         payload = {
-            "client_id": self.user_name,
+            "client_id": self.client_id,
             "deps_static": sorted(suite.deps_static),
             "deps_dynamic": {name: sorted(dyn.options)
                              for name, dyn in suite.deps_dynamic.items()}
@@ -123,56 +126,31 @@ class ServerDepManager:
             response = requests.post(
                 f"{self.server_url}/lock",
                 json=payload,
-                stream=True,
-                timeout=(5, 10)
-            )
+                timeout=5)
             print(f"[DEBUG] HTTP response received: {response.status_code}", flush=True)
+
         except requests.RequestException as exc:
-            print(f"[SERVER-DEPMRG] Lock request failed: {exc}")
+            print(f"[SERVER-DEPMGR] Lock request failed: {exc}")
             return False
 
         # Server immediately rejects unavailable dependencies
         if response.status_code == 409:
-            response.close()
             return False
 
         if response.status_code != 200:
-            print(f"[SERVER-DEPMRG] Lock request failed: {response.status_code} {response.text}")
-            response.close()
+            print(f"[SERVER-DEPMGR] Lock request failed: {response.status_code} {response.text}")
             return False
-
-        # Debug-Block
-        print("[DEBUG] Waiting for lock confirmation...", flush=True)
-        line_iterator = response.iter_lines(chunk_size=1, decode_unicode=True)
-        data = None
-        for line in line_iterator:
-            print(f"[DEBUG] Received stream line: {line!r}", flush=True)
-            if not line.strip():
-                continue
-            data = json.loads(line)
-            break
-        if data is None:
-            response.close()
-            print(f"[DEBUG] Stream ended without confirmation.", flush=True)
-            return False
-        print(f"[DEBUG] Parsed confirmation: {data}", flush=True)
 
         try:
-            # first_line = next((line for line in line_iterator if line.strip()), None)
-            # if first_line is None:
-            #     raise ValueError("Server closed the stream without confirmation")
+            data = response.json()
 
-            # data = response.json()
             if data.get("status") != "locked":
                 raise ValueError(f"Unexpected lock response: {data}")
 
-            session_uuid = data.get("session_uuid")
             assigned_dynamic = data.get("deps_assigned")
             devices_raw = data.get("devices")
 
-            if (not isinstance(session_uuid, str)
-                or not session_uuid
-                or not isinstance(assigned_dynamic, dict)
+            if (not isinstance(assigned_dynamic, dict)
                 or not isinstance(devices_raw, list)
                 or any(not isinstance(device, str) for device in devices_raw)
             ):
@@ -182,6 +160,7 @@ class ServerDepManager:
             if set(assigned_dynamic) != set(suite.deps_dynamic):
                 raise ValueError("Dynamic dependency assignments do not match")
 
+            # Verfiy every dynamic assignment
             for name, device in assigned_dynamic.items():
                 if(not isinstance(device, str) or device not in suite.deps_dynamic[name].options):
                     raise ValueError(f"Invalid assignment for dynamic dependency '{name}'")
@@ -195,9 +174,7 @@ class ServerDepManager:
             if not concrete_devices.issubset(self.all):
                 raise ValueError("Server assogmed a device outside this stage's dependencies")
 
-        except (ValueError, TypeError) as exc:
-            # Closing the stream tells server to clean up this session
-            response.close()
+        except (ValueError, TypeError, json.JSONDecodeError) as exc:
             print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
             return False
 
@@ -209,42 +186,93 @@ class ServerDepManager:
         self.available.difference_update(concrete_devices)
         self.in_use.update(concrete_devices)
 
-        # Retain the open response for free(suite)
-        self.active_connections[suite] = {
-            "session_uuid": session_uuid,
-            "devices": concrete_devices,
-            "response": response,
-            "line_iterator": line_iterator
-        }
+        # Remember which devices belong to this suite
+        self.pending_locks[suite] = concrete_devices
 
-        print(f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} with session '{session_uuid}'.")
+        # starts sending keepalive-requests every 30 seconds
+        self.start_keepalive()
+
+        print(f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for client '{self.client_id}'.")
         return True
 
     def free(self, suite: "Suite"):
-        # Release the suites dependencies & close lock connection
+        # Release the suites dependencies
 
-        connection = self.active_connections.pop(suite, None)
+        devices = self.pending_locks.get(suite, None)
 
-        if connection is None:
-            print(f"[SERVER-DEPMGR] No active lock session found for '{suite}'.")
+        if devices is None:
+            print(f"[SERVER-DEPMGR] No active lock found for '{suite}'.")
             return
 
-        devices = connection["devices"]
-        session_uuid = connection["session_uuid"]
+        payload = {"client_id": self.client_id,
+                   "devices": sorted(devices)}
 
         try:
-            connection["response"].close()      # ends session on server
-        finally:
-            self.available.update(devices)
-            self.in_use.difference_update(devices)
+            response = requests.post(f"{self.server_url}/free",
+                                        json=payload,
+                                        timeout=5)
+        except requests.RequestException as exc:
+            print(f"[SERVER-DEPMGR] Failed to release locks: {exc}")
+            return
 
-        print(f"[SERVER-DEPMGR] Released {sorted(devices)} from session '{session_uuid}'.")
+        if response.status_code != 200:
+            print(f"[SERVER-DEPMGR] Server rejected unlock request: {response.status_code} {response.text}")
+            return
 
-    def _watch_session(self, session_uuid, stop_event):
+        # Server successfully released the locks
+        self.pending_locks.pop(suite)
+
+        # Keep Medusa's local bookkeeping in sync
+        self.available.update(devices)
+        self.in_use.difference_update(devices)
+
+        if not self.pending_locks:
+            self.stop_keepalive()
+
+        print(f"[SERVER-DEPMGR] Released {sorted(devices)} for client '{self.client_id}'.")
+
+    def keepalive(self) -> bool:
+        # Sends one keepalive-request
+
         try:
-            requests.post(f"{self.server_url}/watch", json={"session_uuid": session_uuid}, timeout=None)
-        except requests.RequestException:
-            pass
+            response = requests.post(f"{self.server_url}/alive", json={"client_id": self.client_id}, timeout=5)
+        except requests.RequestException as exc:
+            print(f"[SERVER-DEPMGR] Keepalive failed: {exc}")
+            return False
+
+        if response.status_code != 200:
+            print(f"[SERVER-DEPMGR] Keepalive rejected: {response.status_code} {response.text}")
+            return False
+
+        return True
+
+    def _keepalive_loop(self):
+        # Loop for sending keepalive every 30 seconds
+        while not self._keepalive_stop.wait(30):
+            self.keepalive()
+
+    def start_keepalive(self):
+        # Starts a keepalive thread
+        # Prevents two keepalive threads from running accidentally
+
+        if self._keepalive_thread is not None and self._keepalive_thread.is_alive():
+            return
+
+        self._keepalive_stop.clear()
+        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
+        self._keepalive_thread.start()
+
+    def stop_keepalive(self):
+        # Stops sending keepalive
+
+        self._keepalive_stop.set()
+
+    def shutdown(self):
+        self.stop_keepalive()
+
+        # Wait until thread ended
+        if self._keepalive_thread.is_alive():
+            self._keepalive_thread.join(timeout=1)
 
 @dataclass
 class ProcessInfo:
@@ -456,8 +484,6 @@ class Runner:
 
             if change_happened:
                 self.print_status()
-            else:
-                time.sleep(0.1)     # to avoid too many requests
 
     def print_status(self):
         pending = self.stage.pending
