@@ -231,25 +231,18 @@ class ServerDepManager:
 
         print(f"[SERVER-DEPMGR] Released {sorted(devices)} for client '{self.client_id}'.")
 
-    def keepalive(self) -> bool:
-        # Sends one keepalive-request
-
-        try:
-            response = requests.post(f"{self.server_url}/alive", json={"client_id": self.client_id}, timeout=5)
-        except requests.RequestException as exc:
-            print(f"[SERVER-DEPMGR] Keepalive failed: {exc}")
-            return False
-
-        if response.status_code != 200:
-            print(f"[SERVER-DEPMGR] Keepalive rejected: {response.status_code} {response.text}")
-            return False
-
-        return True
-
     def _keepalive_loop(self):
         # Loop for sending keepalive every 30 seconds
         while not self._keepalive_stop.wait(30):
-            self.keepalive()
+            # Sends one keepalive-request
+            try:
+                response = requests.post(f"{self.server_url}/alive", json={"client_id": self.client_id}, timeout=5)
+
+                if response.status_code != 200:
+                    print(f"[SERVER-DEPMGR] Keepalive rejected: {response.status_code} {response.text}")
+
+            except requests.RequestException as exc:
+                print(f"[SERVER-DEPMGR] Keepalive failed: {exc}")
 
     def start_keepalive(self):
         # Starts a keepalive thread
