@@ -112,14 +112,14 @@ def print_status(data):
 
     if not active_locks:
         print("No active locks.")
+    else:
+        print("Active locks:\n")
+        print(f"{'DEVICE':<10} {'CLIENT':<40} {'SINCE'}")
 
-    print("Active locks:\n")
-    print(f"{'DEVICE':<10} {'CLIENT':<40} {'SINCE'}")
-
-    for device, lock in active_locks.items():
-        client_id = lock["client_id"]
-        timestamp = datetime.fromtimestamp(lock["timestamp"]).strftime("%H:%M:%S")
-        print(f"{device:<10} {client_id:<40} {timestamp}")
+        for device, lock in active_locks.items():
+            client_id = lock["client_id"]
+            timestamp = datetime.fromtimestamp(lock["timestamp"]).strftime("%H:%M:%S")
+            print(f"{device:<10} {client_id:<40} {timestamp}")
 
 def send_keepalive(client_id: str) -> bool:
     # Tell server that client is still alive
