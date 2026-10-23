@@ -33,8 +33,20 @@ def send_lock():
 def send_free():
     pass
 
-def show_status():
-    pass
+def show_status() -> bool:
+    # Print current server status
+    try:
+        response = requests.get(f"{SERVER_URL}/status", timeout=5)
+    except requests.RequestException as exc:
+        print(f"Status request failed: {exc}")
+        return False
+
+    if response.status_code != 200:
+        print(f"Keepalive rejected: {response.status_code} {response.text}")
+        return False
+
+    print(response.text)
+    return True
 
 def send_keepalive(client_id: str) -> bool:
     # Tell server that client is still alive
