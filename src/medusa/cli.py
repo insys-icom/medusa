@@ -27,6 +27,21 @@ def parse_arguments():
 
     return parser.parse_args()
 
+def parse_dependencies(dependencies):
+    # Parses dependency-arguments into static & dynamic dependencies
+    static_deps = []
+    dynamic_deps = {}
+
+    for dep in dependencies:
+        if dep.startswith("dynamic:"):
+            dynamic = dep[len("dynamic:"):]
+            name, values = dynamic.split("=", 1)
+            dynamic_deps[name] = values.split(",")
+        else:
+            static_deps.append(dep)
+
+    return static_deps, dynamic_deps
+
 def send_lock(client_id: str, static_deps: list[str], dynamic_deps: list[set]) -> bool:
     # Sends lock-request to server for dependencies
     payload = {"client_id": client_id,
@@ -123,7 +138,9 @@ def main():
         return
 
     if args.command == "lock":
-        if send_lock(client_id, args.dependencies):
+        static_deps, dynamic_deps = parse_dependencies(args.dependencies)
+
+        if send_lock(client_id, static_deps, dynamic_deps):
             print(f"Client ID: {client_id}")
             keepalive_loop(client_id)
 
