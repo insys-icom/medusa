@@ -18,7 +18,7 @@ class DepLockManager:
         self.server_mutex = asyncio.Lock()  # mutex-protection
         self.clients: dict[str, ClientInfo]= {}
 
-    def get_or_create_client(self, client_id: str) -> ClientInfo:
+    def get_or_create_client(self, client_id: str) -> ClientInfo | None:
         if client_id not in self.clients:
             self.clients[client_id] = ClientInfo(client_id=client_id, last_alive=time.time())
 
@@ -32,7 +32,7 @@ class DepLockManager:
         client.last_alive = time.time()
         return client
 
-    def check_and_reclaim_expired_locks(self, timeout_seconds=10):
+    def check_and_reclaim_expired_locks(self, timeout_seconds=60):
         # Cleans up expired locks
         current_time = time.time()
 

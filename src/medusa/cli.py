@@ -1,4 +1,5 @@
 import argparse
+from datetime import datetime
 import requests
 import uuid
 import time
@@ -86,20 +87,39 @@ def send_free(client_id:str, dependencies: list[str]) -> bool:
     print(f"Freed dependencies: {dependencies}")
     return True
 
-def show_status() -> bool:
+def show_status():
     # Print current server status
     try:
         response = requests.get(f"{SERVER_URL}/status", timeout=5)
     except requests.RequestException as exc:
         print(f"Status request failed: {exc}")
-        return False
+        return
 
     if response.status_code != 200:
         print(f"Status rejected: {response.status_code} {response.text}")
-        return False
+        return
 
-    print(response.text)
-    return True
+    try:
+        data = response.json()
+    except ValueError:
+        print("Status request returned invalid JSON.")
+        return
+
+    print_status(data)
+
+def print_status(data):
+    active_locks = data.get("active_locks", {})
+
+    if not active_locks:
+        print("No active locks.")
+
+    print("Active locks:\n")
+    print(f"{'DEVICE':<10} {'CLIENT':<40} {'SINCE'}")
+
+    for device, lock in active_locks.items():
+        client_id = lock["client_id"]
+        timestamp = datetime.fromtimestamp(lock["timestamp"]).strftime("%H:%M:%S")
+        print(f"{device:<10} {client_id:<40} {timestamp}")
 
 def send_keepalive(client_id: str) -> bool:
     # Tell server that client is still alive
