@@ -59,39 +59,6 @@ class _SignalMonitor:
 SIGNAL_MONITOR = _SignalMonitor()
 
 
-class DepManager:
-    def __init__(self, stage: "Stage"):
-        all_deps: set[str] = set(stage.deps_static_cnt).union(
-            stage.deps_dynamic_cnt
-        )
-        self.all = frozenset(all_deps)
-        self.available = set(all_deps)
-        self.in_use: set[str] = set()
-
-    def try_lock(self, suite: "Suite") -> bool:
-        """Attempt to lock dependencies for the given suite. Returns True on
-        success or False if not all necessary dependencies were available."""
-        deps_assigned = suite.try_assign_deps(self.available)
-        if deps_assigned is None:
-            return False
-
-        assert deps_assigned.issubset(self.all)
-        assert deps_assigned.issubset(self.available), (
-            f"assigned={deps_assigned}, available={self.available}, all={self.all}"
-        )
-        self.available.difference_update(deps_assigned)
-        self.in_use.update(deps_assigned)
-        return True
-
-    def free(self, suite: "Suite"):
-        deps_assigned = suite.deps
-        assert deps_assigned.issubset(self.all)
-        assert deps_assigned.issubset(self.in_use)
-
-        self.available.update(deps_assigned)
-        self.in_use.difference_update(deps_assigned)
-
-
 class ServerDepManager:
     def __init__(self, stage:"Stage", server_url="http://127.0.0.1:8080"):
         all_deps: set[str] = set(stage.deps_static_cnt).union(stage.deps_dynamic_cnt)
@@ -104,9 +71,6 @@ class ServerDepManager:
 
         self.server_url = server_url
         self.client_id = str(uuid.uuid4())
-
-        self._keepalive_stop = threading.Event()
-        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
 
     def try_lock(self, suite: "Suite") -> bool:
         # Ask server to lock & assign the suite's dependencies
@@ -189,9 +153,6 @@ class ServerDepManager:
         # Remember which devices belong to this suite
         self.pending_locks[suite] = concrete_devices
 
-        # starts sending keepalive-requests every 30 seconds
-        self.start_keepalive()
-
         print(f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for client '{self.client_id}'.")
         return True
 
@@ -226,46 +187,26 @@ class ServerDepManager:
         self.available.update(devices)
         self.in_use.difference_update(devices)
 
-        if not self.pending_locks:
-            self.stop_keepalive()
-
         print(f"[SERVER-DEPMGR] Released {sorted(devices)} for client '{self.client_id}'.")
 
-    def _keepalive_loop(self):
-        # Loop for sending keepalive every 30 seconds
-        while not self._keepalive_stop.wait(30):
-            # Sends one keepalive-request
-            try:
-                response = requests.post(f"{self.server_url}/alive", json={"client_id": self.client_id}, timeout=5)
+    def send_keepalive(self):
+        # Sends one keepalive-request
 
-                if response.status_code != 200:
-                    print(f"[SERVER-DEPMGR] Keepalive rejected: {response.status_code} {response.text}")
+        try:
+            response = requests.post(f"{self.server_url}/alive",
+                                     json={"client_id": self.client_id},
+                                     timeout=5)
+        except requests.RequestException as exc:
+            print(f"[SERVER-DEPMGR] Keepalive failed: {exc}")
+            return False
 
-            except requests.RequestException as exc:
-                print(f"[SERVER-DEPMGR] Keepalive failed: {exc}")
+        if response.status_code != 200:
+            print(f"[SERVER-DEPMGR] Keepalive rejected: {response.status_code} {response.text}")
+            return False
 
-    def start_keepalive(self):
-        # Starts a keepalive thread
-        # Prevents two keepalive threads from running accidentally
+        print(f"[SERVER-DEPMGR] Keepalive sent for '{self.client_id}'")
+        return True
 
-        if self._keepalive_thread is not None and self._keepalive_thread.is_alive():
-            return
-
-        self._keepalive_stop.clear()
-        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
-        self._keepalive_thread.start()
-
-    def stop_keepalive(self):
-        # Stops sending keepalive
-
-        self._keepalive_stop.set()
-
-    def shutdown(self):
-        self.stop_keepalive()
-
-        # Wait until thread ended
-        if self._keepalive_thread.is_alive():
-            self._keepalive_thread.join(timeout=1)
 
 @dataclass
 class ProcessInfo:
@@ -474,6 +415,10 @@ class Runner:
                     if self.depmgr.try_lock(suite):
                         self.procmgr.start(suite, retry=retry)
                         change_happened = True
+
+            # Send keepalive while locks are active
+            if self.depmgr.pending_locks:
+                self.depmgr.send_keepalive()
 
             if change_happened:
                 self.print_status()

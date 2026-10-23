@@ -1,6 +1,7 @@
 from aiohttp import web
 import asyncio
 from dataclasses import dataclass, field
+from datetime import datetime
 import time
 
 @dataclass
@@ -151,6 +152,7 @@ class DepLockManager:
 
 POOL = DepLockManager()
 
+
 async def parse_lock_request(request_data):
     try:
         body = await request_data.json()
@@ -222,6 +224,7 @@ async def parse_free_request(request):
 
     return client_id, set(devices)
 
+
 async def handle_alive(request):
     # Function to handle a alive-request from client
 
@@ -241,7 +244,8 @@ async def handle_alive(request):
     if not updated:
         return web.json_response({"status": "error", "message": "Unknown client"}, status=404)
 
-    print(f"[ALIVE] Client '{client_id}' updated last_alive to {updated.last_alive}")
+    readable_time = datetime.fromtimestamp(updated.last_alive).strftime('%Y-%m-%d %H:%M:%S')
+    print(f"[ALIVE] Client '{client_id}' updated last_alive to {readable_time}")
     return web.json_response({"status": "alive"})
 
 async def handle_lock(request):

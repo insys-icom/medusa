@@ -73,6 +73,7 @@ def unlock():
     depmgr.free(suite)
     print("free() finished")
 
+# Test multiple clients
 def main0():
     def client_a(depmgr, suite):
         print("[A] Calling try_lock()...")
@@ -124,6 +125,7 @@ def main0():
     print("In use B:", depmgr_b.in_use)
     # print("Active connections:", depmgr.active_connections)
 
+# Test dependency assignment
 def main1():
     stage = FakeStage({"testm1", "testm4", "testm4_2", "m4_mrx2"})
     suite = FakeSuite({"testm1"})
@@ -139,7 +141,7 @@ def main1():
         print("Lock failed.")
         return
 
-    print(f"Active connections: {list(depmgr.active_connections)}")
+    print(f"Active connections: {list(depmgr.pending_locks)}")
     status_response = requests.get(f"{SERVER_URL}/status", timeout=5)
     print("Server status while locked:", status_response.json())
 
@@ -212,6 +214,7 @@ def main1():
         assert assignments["DUT_A"] != assignments["DUT_B"]
         depmgr.free(multiple_suite)
 
+# Test handle_endpoints
 def main2():
     client_id = str(uuid.uuid4())
 
@@ -246,6 +249,7 @@ def main2():
     print("Status:", response.status_code)
     print("Body:", response.text)
 
+# Test client expires
 def main3():
     client_id = str(uuid.uuid4())
 
@@ -276,5 +280,51 @@ def main3():
     print("Status:", response.status_code)
     print("Body:", response.text)
 
+# Test: Do /lock, /free, /alive work? Is last_alive updated?
+def main4():
+    print(f"Client ID: {depmgr.client_id}")
+
+    # 1. Lock dependency
+    locked = depmgr.try_lock(suite)
+    print(f"try_lock() returned: {locked}")
+
+    # 2. Send keepalive
+    alive = depmgr.send_keepalive()
+    print(f"send_keepalive() returned: {alive}")
+
+    # 3. Waiting to see timestamp
+    time.sleep(2)
+
+    # 4. send keepalive again
+    alive = depmgr.send_keepalive()
+    print(f"send_keepalive() returned: {alive}")
+
+    # 5. Lock wieder freigeben
+    depmgr.free(suite)
+
+# Test: Does run_stage() work propperly?
+def main5():
+    print(f"Client ID: {depmgr.client_id}")
+
+    locked = depmgr.try_lock(suite)
+    print(f"try_lock() returned: {locked}")
+
+    if not locked:
+        raise SystemExit(1)
+
+    print("Suite is running...")
+
+    # Simulate that suite runs longer
+    # NO manual keepalive()-call
+    for i in range(10):
+        print(f"Test running... {i+1}/10")
+        time.sleep(1)
+
+    print("Suite finished.")
+
+    depmgr.free(suite)
+
+    print("Test finished.")
+
 if __name__ == "__main__":
-    main3()
+    main5()
