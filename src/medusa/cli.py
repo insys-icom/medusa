@@ -1,6 +1,7 @@
 import argparse
 import requests
 import uuid
+import time
 
 
 SERVER_URL = "http://127.0.0.1:8080"
@@ -11,6 +12,7 @@ def generate_client_id() -> str:
     return str(uuid.uuid4())
 
 def parse_arguments():
+    # Parses arguments
     parser = argparse.ArgumentParser(description="Medusa lock-server CLI")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -34,8 +36,32 @@ def send_free():
 def show_status():
     pass
 
-def send_keepalive():
-    pass
+def send_keepalive(client_id: str) -> bool:
+    # Tell server that client is still alive
+    try:
+        response = requests.post(f"{SERVER_URL}/alive", json={"client_id": client_id}, timeout=5)
+    except requests.RequestException as exc:
+        print(f"Keepalive failed: {exc}")
+        return False
+
+    if response.status_code != 200:
+        print(f"Keepalive rejected: {response.status_code} {response.text}")
+        return False
+
+    return True
+
+def keepalive_loop(client_id: str):
+    # Keep the client alive while it owns locks
+    try:
+        while True:
+            time.sleep(30)
+
+            if not send_keepalive(client_id):
+                print("Keepalive failed. Stopping keepalive loop.")
+                break
+
+    except KeyboardInterrupt:
+        print("\nStopping client.")
 
 def main():
     client_id = generate_client_id()
@@ -49,7 +75,7 @@ def main():
     if args.command == "lock":
         if send_lock(client_id, args.dependencies):
             print(f"Client ID: {client_id}")
-            send_keepalive(client_id)
+            keepalive_loop(client_id)
 
     elif args.command == "free":
         send_free(client_id, args.dependencies)
