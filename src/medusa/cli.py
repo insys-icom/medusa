@@ -27,8 +27,31 @@ def parse_arguments():
 
     return parser.parse_args()
 
-def send_lock():
-    pass
+def send_lock(client_id: str, static_deps: list[str], dynamic_deps: list[set]) -> bool:
+    # Sends lock-request to server for dependencies
+    payload = {"client_id": client_id,
+               "deps_static": static_deps,
+               "deps_dynamic": dynamic_deps}
+
+    try:
+        response = requests.get(f"{SERVER_URL}/lock", json=payload, timeout=5)
+    except requests.RequestException as exc:
+        print(f"Failed to contact lock server: {exc}")
+        return False
+
+    if response.status_code != 200:
+        print(f"Lock request failed: {response.status_code} {response.text}")
+        return False
+
+    data = response.json()
+    static_locked = data.get('devices', [])
+    dynamic_locked = data.get('deps_assigned', [])
+
+    print(f"\nLocked dependencies:")
+    print(f"- static: {static_locked}")
+    print(f"- dynamic: {dynamic_locked}")
+
+    return True
 
 def send_free():
     pass
