@@ -53,8 +53,23 @@ def send_lock(client_id: str, static_deps: list[str], dynamic_deps: list[set]) -
 
     return True
 
-def send_free():
-    pass
+def send_free(client_id:str, dependencies: list[str]) -> bool:
+    # Release-request for locked dependencies
+    payload = {"client_id": client_id,
+               "devices": dependencies}
+
+    try:
+        response = requests.get(f"{SERVER_URL}/free", json=payload, timeout=5)
+    except requests.RequestException as exc:
+        print(f"Failed to contact server: {exc}")
+        return False
+
+    if response.status_code != 200:
+        print(f"Free request failed: {response.status_code} {response.text}")
+        return False
+
+    print(f"Freed dependencies: {dependencies}")
+    return True
 
 def show_status() -> bool:
     # Print current server status
