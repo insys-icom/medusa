@@ -49,7 +49,7 @@ def send_lock(client_id: str, static_deps: list[str], dynamic_deps: list[set]) -
                "deps_dynamic": dynamic_deps}
 
     try:
-        response = requests.get(f"{SERVER_URL}/lock", json=payload, timeout=5)
+        response = requests.post(f"{SERVER_URL}/lock", json=payload, timeout=5)
     except requests.RequestException as exc:
         print(f"Failed to contact lock server: {exc}")
         return False
@@ -74,7 +74,7 @@ def send_free(client_id:str, dependencies: list[str]) -> bool:
                "devices": dependencies}
 
     try:
-        response = requests.get(f"{SERVER_URL}/free", json=payload, timeout=5)
+        response = requests.post(f"{SERVER_URL}/free", json=payload, timeout=5)
     except requests.RequestException as exc:
         print(f"Failed to contact server: {exc}")
         return False
@@ -89,7 +89,7 @@ def send_free(client_id:str, dependencies: list[str]) -> bool:
 def show_status() -> bool:
     # Print current server status
     try:
-        response = requests.get(f"{SERVER_URL}/status", timeout=5)
+        response = requests.post(f"{SERVER_URL}/status", timeout=5)
     except requests.RequestException as exc:
         print(f"Status request failed: {exc}")
         return False
