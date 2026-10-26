@@ -43,9 +43,10 @@ def parse_dependencies(dependencies):
 
     return static_deps, dynamic_deps
 
-def send_lock(client_id: str, static_deps: list[str], dynamic_deps: list[set]) -> bool:
+def send_lock(client_id: str, session_id: str, static_deps: list[str], dynamic_deps: list[set]) -> bool:
     # Sends lock-request to server for dependencies
     payload = {"client_id": client_id,
+               "session_id": session_id,
                "deps_static": static_deps,
                "deps_dynamic": dynamic_deps}
 
@@ -69,9 +70,10 @@ def send_lock(client_id: str, static_deps: list[str], dynamic_deps: list[set]) -
 
     return True
 
-def send_free(client_id:str, dependencies: list[str]) -> bool:
+def send_free(client_id: str, session_id: str, dependencies: list[str]) -> bool:
     # Release-request for locked dependencies
     payload = {"client_id": client_id,
+               "session_id": session_id,
                "devices": dependencies}
 
     try:
@@ -150,6 +152,7 @@ def keepalive_loop(client_id: str):
 
 def main():
     client_id = generate_client_id()
+    session_id = str(uuid.uuid4())
 
     args = parse_arguments()
 
@@ -160,12 +163,13 @@ def main():
     if args.command == "lock":
         static_deps, dynamic_deps = parse_dependencies(args.dependencies)
 
-        if send_lock(client_id, static_deps, dynamic_deps):
+        if send_lock(client_id, session_id, static_deps, dynamic_deps):
             print(f"Client ID: {client_id}")
+            print(f"Session ID: {session_id}")
             keepalive_loop(client_id)
 
     elif args.command == "free":
-        send_free(client_id, args.dependencies)
+        send_free(client_id, session_id, args.dependencies)
 
 if __name__ == "__main__":
     main()
