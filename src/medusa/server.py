@@ -30,9 +30,12 @@ class DepLockManager:
         client = self.clients.get(client_id)
 
         if client is None:
+            print(f"[ALIVE] Unknown client: {client_id}")
             return None
 
         if session_id not in client.sessions:
+            print(f"[ALIVE] Unknown session '{session_id}' for client '{client_id}'.")
+            print(f"[ALIVE] Known sessions: {list(client.sessions.keys())}")
             return None
 
         client.last_alive = time.time()
@@ -45,7 +48,15 @@ class DepLockManager:
         # Get expired clients
         expired_clients = []
         for client_id, client in self.clients.items():
-            if (current_time - client.last_alive) > timeout_seconds:
+            age = current_time - client.last_alive
+
+            print(f"[CLEANUP] Client '{client_id}': "
+                  f"last_alive={client.last_alive}, "
+                  f"age={age:.1f}s, "
+                  f"timeout={timeout_seconds}s")
+
+
+            if age > timeout_seconds:
                 expired_clients.append(client_id)
 
         for client_id in expired_clients:
@@ -54,7 +65,11 @@ class DepLockManager:
 
             # Free all locks belonging to this client
             for session_id, session_deps in list(client.sessions.items()):
-                self.release_all_locks_for_client(client_id, session_id, session_deps.copy())
+                for device in session_deps:
+                    self.active_locks.pop(device, None)
+
+                print(f"[FREE] Released locks of client '{client_id}' (Session: {session_id}): {sorted(session_deps)}.")
+                # self.release_all_locks_for_client(client_id, session_id, session_deps.copy())
 
             # Remove client
             del self.clients[client_id]
@@ -178,6 +193,28 @@ class DepLockManager:
 POOL = DepLockManager()
 
 
+async def cleanup_loop():
+    # Cleans up expired locks every 5 seconds
+    while True:
+        await asyncio.sleep(5)
+
+        async with POOL.server_mutex:
+            POOL.check_and_reclaim_expired_locks(timeout_seconds=20)
+
+async def on_startup(app):
+    # Creates cleanup-task when the application was started
+    app["cleanup_task"] = asyncio.create_task(cleanup_loop())
+
+async def on_cleanup(app):
+    # Stops cleanup-task when application ends
+    app["cleanup_task"].cancel()
+
+    try:
+        await app["cleanup_task"]
+    except asyncio.CancelledError:
+        pass
+
+
 async def parse_lock_request(request_data):
     try:
         body = await request_data.json()
@@ -280,7 +317,7 @@ async def handle_alive(request):
         updated = POOL.update_alive(client_id, session_id)
 
     if not updated:
-        return web.json_response({"status": "error", "message": "Unknown client"}, status=404)
+        return web.json_response({"status": "error", "message": "Unknown client or session"}, status=404)
 
     readable_time = datetime.fromtimestamp(updated.last_alive).strftime('%Y-%m-%d %H:%M:%S')
     print(f"[ALIVE] Client '{client_id}' updated last_alive to {readable_time}")
@@ -312,7 +349,7 @@ async def handle_lock(request):
 
     async with POOL.server_mutex:
         # 3. Preventive Cleanup: Prevents orphaned locks from blocking the system
-        POOL.check_and_reclaim_expired_locks(timeout_seconds=60)
+        POOL.check_and_reclaim_expired_locks()
 
         # 4. Check availability & assign dependencies
         lock_data = await POOL.resolve_and_assign_dependencies(client_id, session_id, static_deps, dynamic_options)
@@ -343,7 +380,7 @@ async def handle_free(request):
 
     # Cleanup & release locks
     async with POOL.server_mutex:
-        POOL.check_and_reclaim_expired_locks(timeout_seconds=600)
+        POOL.check_and_reclaim_expired_locks()
 
         client = POOL.clients.get(client_id)
         if client is None:
@@ -375,7 +412,7 @@ async def handle_status(request):
     print(f"[SERVER] Global status dashboard request received. Preparing data ...")
 
     async with POOL.server_mutex:
-        POOL.check_and_reclaim_expired_locks(timeout_seconds=5)
+        POOL.check_and_reclaim_expired_locks()
 
         safe_active_locks = {}
 
@@ -400,4 +437,8 @@ if __name__ == "__main__":
         web.post('/alive', handle_alive)
     ])
     print("Medusa lock-server auf http://127.0.0.1:8080 ...")
+
+    app.on_startup.append(on_startup)
+    app.on_cleanup.append(on_cleanup)
+
     web.run_app(app, host='127.0.0.1', port=8080)
