@@ -14,12 +14,21 @@ if TYPE_CHECKING:
     from .data import Data
     from .settings import Settings
 
+from .cli import (
+    lock_dependencies,
+    free_dependencies,
+    show_status,
+)
+
 HELP = f"""Medusa: Run Robot Framework suites with depdendency-aware parallelization
 
 Usage:
   medusa run [-v] [-d OUTPUTDIR] [-f FILTER]... [-t TIMEOUT] [--] ROBOTARGS...
   medusa stats [-v] [-f FILTER]... [-s SELECTION] [--] ROBOTARGS...
-  medusa help [filter|timeout]
+  medusa lock DEVICES...
+  medusa free UUID
+  medusa status
+  medusa help [filter|timeout|lock|free|status]
   medusa version
 
 Subcommands:
@@ -27,12 +36,17 @@ Subcommands:
   run            Run the given robot suite(s).
   stats          Display information about the given robot suite(s). Outputs
                  all information by default, see -s if you want less output.
+  lock           Lock dependencies using the lock server.
+  free           Release a lock session.
+  status         Show currently active lock sessions.
   version        Show Medusa version.
 
 Arguments:
   ROBOTARGS      Arguments for the robot command line tool. If you use robot
                  options, you need to write '--' before the robot options to
                  separate them from the medusa options.
+  DEVICES        Dependencies to lock. Supports static and dynamic
+                 dependencies.
 
 Options:
   -d --outputdir OUTPUTDIR  Store results in OUTPUTDIR, must not already exist.
@@ -106,6 +120,48 @@ HELP_FILTER = """Filters:
                         # for those that also contain 'two'.
 """
 
+HELP_LOCK = """Lock:
+  Lock one or more dependencies using the Medusa lock server.
+
+  Usage:
+    medusa lock DEVICES...
+
+  DEVICES con contain static dependencies or dynamic dependencies.
+
+  Dynamic dependencies usw the following format:
+    dynamic:NAME=DEVICE1,DEVICE2
+
+  Examples:
+    medusa lock device1 device2
+    medusa lock dynamic:deviceGroup=device1,device2
+    medusa lock device1 dynamic:deviceGroup=device2,device3
+
+  The command remains active while the lock is held and sends periodic
+  keepalive requests to the server.
+"""
+
+HELP_FREE = """Free:
+  Release all dependencies belonging to a lock session.
+
+  Usage:
+    medusa free UUID
+
+  UUID is the session ID returned by the lock command.
+
+  Example:
+    medusa free 123e4567-e89b-12d3-a456-426614174000
+"""
+
+HELP_STATUS = """Status:
+  Display all currently active lock sessions and their locked dependencies.
+
+  Usage:
+    medusa status
+
+  Example:
+    medusa status
+"""
+
 
 def main() -> None:
     try:
@@ -123,12 +179,24 @@ def main() -> None:
                 print(HELP_TIMEOUT)
             elif arguments["filter"]:
                 print(HELP_FILTER)
+            elif arguments["lock"]:
+                print(HELP_LOCK)
+            elif arguments["free"]:
+                print(HELP_FREE)
+            elif arguments["status"]:
+                print(HELP_STATUS)
             else:
                 print(HELP)
         elif arguments["version"]:
             from .version import __version__
 
             print(__version__)
+        elif arguments["lock"]:
+            lock_dependencies(arguments["DEVICES"])
+        elif arguments["free"]:
+            free_dependencies(arguments["UUID"])
+        elif arguments["status"]:
+            show_status()
         else:
             from pathlib import Path
 
