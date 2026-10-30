@@ -1,47 +1,11 @@
 import argparse
 from datetime import datetime
 import requests
-import uuid
 import time
-import json
-import os
 
 
 SERVER_URL = "http://127.0.0.1:8080"
-SESSION_FILE = os.path.expanduser("~/.medusa_lock_session")
 
-
-def save_session(client_id: str, session_id: str, devices: list[str]):
-    # Saves session data
-    with open(SESSION_FILE, "w") as file:
-        json.dump({"client_id": client_id,
-                   "session_id": session_id,
-                   "devices": devices,},
-                   file
-        )
-
-def load_session() -> tuple[str, str] | None:
-    # Loads session-file
-    try:
-        with open(SESSION_FILE) as file:
-            data = json.load(file)
-
-        return data["client_id"], data["session_id"], data["devices"]
-
-    except (FileNotFoundError, KeyError, json.JSONDecodeError):
-        return None
-
-def delete_session():
-    # Deletes session-file
-    try:
-        os.remove(SESSION_FILE)
-    except FileNotFoundError:
-        pass
-
-
-def generate_client_id() -> str:
-    # Generates a unique client ID for this CLI session
-    return str(uuid.uuid4())
 
 def parse_arguments():
     # Parses arguments
@@ -53,14 +17,15 @@ def parse_arguments():
     lock_parser.add_argument("dependencies", nargs="+", help="Dependencies to lock")
 
     free_parser = subparsers.add_parser("free")
-    free_parser.add_argument("dependencies", nargs="+", help="Dependencies to free")
+    free_parser.add_argument("session_id", help="UUID of the session to release",)
 
-    status_parser = subparsers.add_parser("status")
+    subparsers.add_parser("status")
 
     return parser.parse_args()
 
-def parse_dependencies(dependencies):
-    # Parses dependency-arguments into static & dynamic dependencies
+def parse_dependencies(dependencies: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+    # Parse dependency-arguments into static & dynamic dependencies
+
     static_deps = []
     dynamic_deps = {}
 
@@ -75,40 +40,66 @@ def parse_dependencies(dependencies):
     return static_deps, dynamic_deps
 
 
-def send_lock(client_id: str, session_id: str, static_deps: list[str], dynamic_deps: list[set]) -> bool:
-    # Sends lock-request to server for dependencies
-    payload = {"client_id": client_id,
-               "session_id": session_id,
-               "deps_static": static_deps,
-               "deps_dynamic": dynamic_deps}
+def send_lock(static_deps: list[str], dynamic_deps: dict[str, set[str]]) -> str | None:
+    # Send lock-request to server and returns the session_id
+
+    payload = {
+        "deps_static": static_deps,
+        "deps_dynamic": {
+            name: sorted(options)
+            for name, options in dynamic_deps.items()
+        },
+    }
 
     try:
         response = requests.post(f"{SERVER_URL}/lock", json=payload, timeout=5)
     except requests.RequestException as exc:
         print(f"Failed to contact lock server: {exc}")
-        return False
+        return None
 
     if response.status_code != 200:
         print(f"Lock request failed: {response.status_code} {response.text}")
-        return False
+        return None
 
     data = response.json()
+    session_id  = data.get("session_id")
     devices_locked = data.get("devices", [])
     dynamic_locked = data.get("deps_assigned", [])
 
-    print(f"\nLocked dependencies:")
+    if not isinstance(session_id, str) or not session_id:
+        print("Lock request failed: Server did not return a session ID.")
+        return None
+
+    print("Locked dependencies:")
     print(f"- devices: {devices_locked}")
     print(f"- dynamic: {dynamic_locked}")
 
-    save_session(client_id, session_id, devices_locked)
+    return session_id
 
-    return True
+def lock_dependencies(dependencies: list[str]) -> None:
+    static_deps, dynamic_deps = parse_dependencies(dependencies)
+    session_id = send_lock(static_deps, dynamic_deps)
 
-def send_free(client_id: str, session_id: str, dependencies: list[str]) -> bool:
-    # Release-request for locked dependencies
-    payload = {"client_id": client_id,
-               "session_id": session_id,
-               "devices": dependencies}
+    if not session_id:
+        return
+
+    print(f"Session ID: {session_id}")
+
+    try:
+        keepalive_loop(session_id)
+    except KeyboardInterrupt:
+        print("\nLock session interrupted.")
+
+        if send_free(session_id):
+            print(f"Session '{session_id}' released.")
+        else:
+            print(f"Could not release session '{session_id}'. The server wukk reclaim it after timeout.")
+
+
+def send_free(session_id: str) -> bool:
+    # Sends release-request for locked dependencies
+
+    payload = {"session_id": session_id}
 
     try:
         response = requests.post(f"{SERVER_URL}/free", json=payload, timeout=5)
@@ -120,11 +111,38 @@ def send_free(client_id: str, session_id: str, dependencies: list[str]) -> bool:
         print(f"Free request failed: {response.status_code} {response.text}")
         return False
 
-    print(f"Freed dependencies: {dependencies}")
+    result = response.json()
+    print(f"Freed dependencies: {result.get("devices", [])}")
     return True
 
+# def send_free_all(client_id: str) -> bool:
+    # Sends request to free all locks from this client
+
+    payload = {"client_id": client_id,
+               "all": True,
+              }
+
+    try:
+        response = requests.post(f"{SERVER_URL}/free", json=payload, timeout=5)
+    except requests.RequestException as exc:
+        print(f"Failed to contact lock server: {exc}")
+        return False
+
+    if response.status_code == 200:
+        result = response.json()
+        print(f"Freed all dependencies: {result["devices"]}")
+        return True
+
+    print(f"Free-all request failed: {response.status_code} {response.text}")
+    return False
+
+def free_dependencies(session_id: str) -> None:
+    if send_free(session_id):
+        print(f"Session '{session_id}' released.")
+
+
 def show_status():
-    # Print current server status
+    # Send status-request and print current server status
     try:
         response = requests.get(f"{SERVER_URL}/status", timeout=5)
     except requests.RequestException as exc:
@@ -143,31 +161,40 @@ def show_status():
 
     print_status(data)
 
-def print_status(data):
-    active_locks = data.get("active_locks", {})
+def print_status(data: dict):
+    # Print active sessions and their locked devices
 
-    if not active_locks:
+    sessions = data.get("sessions", [])
+
+    if not sessions:
         print("No active locks.")
-    else:
-        print("Active locks:\n")
-        print(f"{'DEVICE':<10} {'CLIENT':<40} {'SINCE'}")
+        return
 
-        for device, lock in active_locks.items():
-            client_id = lock["client_id"]
-            timestamp = datetime.fromtimestamp(lock["timestamp"]).strftime("%H:%M:%S")
-            print(f"{device:<10} {client_id:<40} {timestamp}")
+    print("==================================== ACTIVE LOCKS ====================================")
+    print(f"{'DEVICE':<15} {'SESSION':<40} {'SINCE':<15} {'LAST ALIVE'}")
+
+    for session in sessions:
+        session_id = session["session_id"]
+        since = datetime.fromtimestamp(session["since"]).strftime("%H:%M:%S")
+        last_alive = datetime.fromtimestamp(session["last_alive"]).strftime("%H:%M:%S")
+
+        for device in session["devices"]:
+            print(f"{device:<15} {session_id:<40} {since:<15} {last_alive}")
 
 
-def send_keepalive(client_id: str, session_id: str) -> bool | None:
-    # Tell server that client is still alive
+def send_keepalive(session_id: str) -> bool | None:
+    # Tell the server that the session is still alive
+
+    payload = {"session_id": session_id}
+
     try:
-        response = requests.post(f"{SERVER_URL}/alive", json={"client_id": client_id, "session_id": session_id}, timeout=5)
+        response = requests.post(f"{SERVER_URL}/alive", json=payload, timeout=5,)
     except requests.RequestException as exc:
         print(f"Keepalive failed: {exc}")
         return False
 
     if response.status_code == 404:
-        print(f"Session {session_id} no longer exists on the server. Stopping keepalive.")
+        print(f"Session {session_id} no longer exists on the server.")
         return None
 
     if response.status_code != 200:
@@ -176,19 +203,20 @@ def send_keepalive(client_id: str, session_id: str) -> bool | None:
 
     return True
 
-def keepalive_loop(client_id: str, session_id: str):
-    # Keep the client alive while it owns locks
+def keepalive_loop(session_id: str):
+    # Keep the session alive while it owns locks
+
     while True:
         time.sleep(10)
 
-        result = send_keepalive(client_id, session_id)
+        result = send_keepalive(session_id)
 
         if result is None:
-            # Session was deleted
+            # Session was deleted on the server
             break
 
         if not result:
-            print(f"Keepalive failed. Stopping keepalive loop. (Client: {client_id})")
+            print(f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})")
             break
 
 
@@ -200,36 +228,25 @@ def main():
         return
 
     if args.command == "lock":
-        client_id = generate_client_id()
-        session_id = str(uuid.uuid4())
         static_deps, dynamic_deps = parse_dependencies(args.dependencies)
 
-        if send_lock(client_id, session_id, static_deps, dynamic_deps):
-            print(f"Client ID: {client_id}")
+        # The server creates the session and returns its UUID
+        session_id = send_lock(static_deps, dynamic_deps)
+
+        if session_id:
             print(f"Session ID: {session_id}")
 
             try:
-                keepalive_loop(client_id, session_id)
+                keepalive_loop(session_id)
             except KeyboardInterrupt:
-                print(f"\nStopping client '{client_id}'.")
+                print(f"\nStopping session '{session_id}'.")
 
     elif args.command == "free":
-        session = load_session()
+        session_id = args.session_id
 
-        if session is None:
-            print("No active lock session found.")
-            return
+        if send_free(session_id):
+            print(f"Session '{session_id}' released.")
 
-        client_id, session_id, devices = session
-
-        if send_free(client_id, session_id, args.dependencies):
-            remaining_devices = [
-                device for device in devices if devices not in args.dependencies
-            ]
-            if remaining_devices:
-                save_session(client_id, session_id, remaining_devices)
-            else:
-                delete_session()
 
 if __name__ == "__main__":
     main()
