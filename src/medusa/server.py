@@ -3,117 +3,77 @@ import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
 import time
+import uuid
 
-@dataclass
-class ClientInfo:
-    client_id: str
+
+@dataclass(eq=False)
+class Session:
+    uuid: str
+    devices: set[str] = field(default_factory=set)
+    since: float = field(default_factory=time.time)
     last_alive: float = field(default_factory=time.time)
-    locks: set[str] = field(default_factory=set)
-    # Maps session_id to locked devices in a specific session
-    sessions: dict[str, set[str]] = field(default_factory=dict)
+
+    @classmethod
+    def create_session(cls, devices: set[str]) -> "Session":
+        # Creates a new session
+        now = time.time()
+
+        return cls(
+            uuid=str(uuid.uuid4()),
+            devices=set(devices),
+            since=now,
+            last_alive=now,
+        )
 
 
 class DepLockManager:
     def __init__(self):
-        # structure: {"device_name": {"device": "...", "client_id": "...", "timestamp": ...}}
-        self.active_locks = {}              # which devices are locked
         self.server_mutex = asyncio.Lock()  # mutex-protection
-        self.clients: dict[str, ClientInfo]= {}
+        self.sessions: set[Session] = set() # set of all active sessions
 
-    def get_or_create_client(self, client_id: str) -> ClientInfo | None:
-        if client_id not in self.clients:
-            self.clients[client_id] = ClientInfo(client_id=client_id, last_alive=time.time())
+    def check_and_reclaim_expired_locks(self, timeout_seconds=30):
+        # Clean up expired locks
 
-        return self.clients[client_id]
-
-    def update_alive(self, client_id: str, session_id: str) -> ClientInfo | None:
-        client = self.clients.get(client_id)
-
-        if client is None:
-            print(f"[ALIVE] Unknown client: {client_id}")
-            return None
-
-        if session_id not in client.sessions:
-            print(f"[ALIVE] Unknown session '{session_id}' for client '{client_id}'.")
-            print(f"[ALIVE] Known sessions: {list(client.sessions.keys())}")
-            return None
-
-        client.last_alive = time.time()
-        return client
-
-    def check_and_reclaim_expired_locks(self, timeout_seconds=60):
-        # Cleans up expired locks
         current_time = time.time()
 
-        # Get expired clients
-        expired_clients = []
-        for client_id, client in self.clients.items():
-            age = current_time - client.last_alive
+        # Get expired sessions
+        expired_sessions = [
+            session
+            for session in self.sessions
+            if current_time - session.last_alive > timeout_seconds
+        ]
 
-            print(f"[CLEANUP] Client '{client_id}': "
-                  f"last_alive={client.last_alive}, "
-                  f"age={age:.1f}s, "
-                  f"timeout={timeout_seconds}s")
+        # Remove expired sessions
+        for session in expired_sessions:
+            self.sessions.remove(session)
 
+            print(f"[CLEANUP] Released locks of session '{session.uuid}': {sorted(session.devices)}.")
 
-            if age > timeout_seconds:
-                expired_clients.append(client_id)
+    def release_session(self, session_id: str) -> dict:
+        # Find all devices which are owned by a specific session & release them
 
-        for client_id in expired_clients:
-            client = self.clients[client_id]
-            print(f"[SERVER] Client '{client_id} has expired. Last alive: {client.last_alive}")
+        session = next(
+            (s for s in self.sessions if s.uuid == session_id),
+            None,
+        )
 
-            # Free all locks belonging to this client
-            for session_id, session_deps in list(client.sessions.items()):
-                for device in session_deps:
-                    self.active_locks.pop(device, None)
+        if session_id is None:
+            return {
+                "status": "error",
+                "message": "Unknown session.",
+            }
 
-                print(f"[FREE] Released locks of client '{client_id}' (Session: {session_id}): {sorted(session_deps)}.")
-                # self.release_all_locks_for_client(client_id, session_id, session_deps.copy())
+        self.sessions.remove(session)
 
-            # Remove client
-            del self.clients[client_id]
+        devices = sorted(session.devices)
 
-    def release_all_locks_for_client(self, client_id: str, session_id: str, devices: set[str]):
-        # Find all devices which are currently owned by a specific client & release devices
+        print(f"[FREE] Released session '{session_id}'. Freed devices: {devices}.")
 
-        # Find client
-        client = self.clients.get(client_id)
-        if client is None:
-            return {"status": "error", "message": "Unknown client."}
-
-        # Find session
-        session_deps = client.sessions.get(session_id)
-        if session_deps is None:
-            return {"status": "error", "message": "Unknown session."}
-
-        # Check ownership
-        if not devices <= session_deps:
-            return {"status": "rejected", "message": "Some devices are not owned by this session."}
-
-        # Check that the locks still belong to this client
-        for device in devices:
-            lock = self.active_locks.get(device)
-
-            if lock is None:
-                continue
-
-            if lock["client_id"] != client_id:
-                return {"status": "rejected",
-                        "message": f"Device '{device}' is locked by '{lock['client_id']}'."}
-
-        # Release locks
-        for device in devices:
-            self.active_locks.pop(device, None)
-            client.locks.discard(device)
-            session_deps.discard(device)
-
-        # Remove empty session
-        if not session_deps:
-            del client.sessions[session_id]
-
-        print(f"[FREE] Released locks of client '{client_id}' (Session: {session_id}): {sorted(devices)}.")
-        return {"status": "freed", "devices": sorted(devices)}
+        return {
+            "status": "freed",
+            "session_id": session_id,
+            "devices": devices,
+        }
 
     def resolve_dynamic_dependencies(self, available_options: dict[str, set[str]]) -> dict [str, str] | None:
         # Assign a distinct available device to every dynamic dependency
@@ -146,67 +106,81 @@ class DepLockManager:
             for device, dep_name in option_owner.items()
         }
 
-    async def resolve_and_assign_dependencies(self, client_id: str, session_id: str, static_deps: set[str], dynamic_raw: dict[str, set[str]]) -> dict:
-        print(f"[SERVER] Request for locking received from '{client_id}' (Session: {session_id}): static={sorted(static_deps)}, dynamic={dynamic_raw}")
+    async def resolve_and_assign_dependencies(self, static_deps: set[str], dynamic_raw: dict[str, set[str]]) -> dict:
+        # Resolve dependencies and create a session if all devices are available
 
-        busy_deps = set(self.active_locks)
+        print(f"[SERVER] Lock request received: static={sorted(static_deps)}, dynamic={dynamic_raw}")
+
+        # 1. Collect all devices currently locked by any session
+        busy_deps = {device
+                     for session in self.sessions
+                     for device in session.devices
+        }
+
+        # 2. Check whether the requested static dependencies are available
         busy_static = static_deps & busy_deps
 
         if busy_static:
             unavailable_message = (f"Static dependencies are busy: {sorted(busy_static)}")
-            return {"status": "unavailable", "message": unavailable_message}
+            return {
+                "status": "unavailable",
+                "message": unavailable_message,
+            }
 
-        available_options = {name: options - busy_deps - static_deps
-                            for name, options in dynamic_raw.items()}
+        # 3. Remove busy devices and static dependencies from dynamic options
+        available_options = {
+            name: options - busy_deps - static_deps
+            for name, options in dynamic_raw.items()
+        }
 
+        # 4. Assign concrete devices to the dynamic dependencies
         assigned_dynamic = self.resolve_dynamic_dependencies(available_options)
 
         if assigned_dynamic is None:
-            unavailable_dependencies = [name
+            unavailable_dependencies = [
+                name
                 for name, options in available_options.items()
-                if not options]
-            unavailable_message = (f"No available devices for dynamic dependencies: {unavailable_dependencies}")
-            return {"status": "unavailable", "message": unavailable_message}
+                if not options
+            ]
 
+            unavailable_message = (f"No available devices for dynamic dependencies: {unavailable_dependencies}")
+            return {
+                "status": "unavailable",
+                "message": unavailable_message,
+            }
+
+        # 5. Combine static and assigned dynamic dependencies
         concrete_deps = (static_deps | set(assigned_dynamic.values()))
 
-        # All devices are free
-        client = self.get_or_create_client(client_id)
-        client.last_alive = time.time()
-        lock_timestamp = time.time()
+        # 6. Create and register a new session for this lock request
+        session = Session.create_session(concrete_deps)
+        self.sessions.add(session)
 
-        for device in concrete_deps:
-            self.active_locks[device] = {"device": device,
-                                         "client_id": client_id,
-                                         "session_id": session_id,
-                                         "timestamp": lock_timestamp}
-
-        client.locks.update(concrete_deps)
-        client.sessions[session_id] = concrete_deps
-
-        return {"status": "locked",
-                "client_id": client_id,
-                "session_id": session_id,
-                "assigned_dynamic": assigned_dynamic,
-                "concrete_deps": concrete_deps}
+        # 7. Return the result to the handler
+        return {
+            "status": "locked",
+            "session": session,
+            "assigned_dynamic": assigned_dynamic,
+            "concrete_deps": concrete_deps,
+        }
 
 POOL = DepLockManager()
 
 
 async def cleanup_loop():
-    # Cleans up expired locks every 5 seconds
+    # Clean up expired locks every 5 seconds
     while True:
+        async with POOL.server_mutex:
+            POOL.check_and_reclaim_expired_locks(timeout_seconds=30)
+
         await asyncio.sleep(5)
 
-        async with POOL.server_mutex:
-            POOL.check_and_reclaim_expired_locks(timeout_seconds=20)
-
 async def on_startup(app):
-    # Creates cleanup-task when the application was started
+    # Create cleanup-task when the application was started
     app["cleanup_task"] = asyncio.create_task(cleanup_loop())
 
 async def on_cleanup(app):
-    # Stops cleanup-task when application ends
+    # Stop cleanup-task when application ends
     app["cleanup_task"].cancel()
 
     try:
@@ -218,26 +192,20 @@ async def on_cleanup(app):
 async def parse_lock_request(request_data):
     try:
         body = await request_data.json()
-        client_id = body.get("client_id")
-        session_id = body.get("session_id")
         static_raw = body.get("deps_static", [])
         dynamic_raw = body.get("deps_dynamic", {})
     except Exception:
         return web.json_response({
             "status": "error",
-            "message": "Malformed JSON payload"},
-            status=400)
+            "message": "Malformed JSON payload"
+        }, status=400)
 
-    if (not isinstance(client_id, str)
-        or not client_id
-        or not isinstance(session_id, str)
-        or not isinstance(static_raw, list)
-        or not isinstance(dynamic_raw, dict)
-    ):
+    if (not isinstance(static_raw, list)
+        or not isinstance(dynamic_raw, dict)):
         return web.json_response({
             "status": "error",
-            "message": "Missing / invalid request fields"},
-            status=400)
+            "message": "Missing / invalid request fields"
+        }, status=400)
 
     if (any(
             not isinstance(device, str)
@@ -258,76 +226,104 @@ async def parse_lock_request(request_data):
     ):
         return web.json_response({
             "status": "error",
-            "message": "Invalid dependency names or options"},
-            status=400)
+            "message": "Invalid dependency names or options"
+        }, status=400)
 
-    return client_id, session_id, static_raw, dynamic_raw
+    return static_raw, dynamic_raw
 
 async def parse_free_request(request):
+    # Parse and validate a session ID from a free request
     try:
         body = await request.json()
-        devices = body.get("devices")
-        client_id = body.get("client_id")
-        session_id = body.get("session_id")
     except Exception:
         return web.json_response({
             "status": "error",
             "message": "Malformed JSON payload"},
             status=400)
 
-    if not isinstance(client_id, str) or not client_id:
-        return web.json_response({
-            "status": "error",
-            "message": "Missing client_id"},
-            status=400)
+    session_id = body.get("session_id")
 
     if not isinstance(session_id, str) or not session_id:
-            return web.json_response({
-                "status": "error",
-                "message": "Missing session_id"},
-                status=400)
-
-    if not isinstance(devices, list) or any(not isinstance(device, str) for device in devices):
         return web.json_response({
-                    "status": "error",
-                    "message": "Invalid devices"},
-                    status=400)
+            "status": "error",
+            "message": "Missing or invalid session_id"
+        }, status=400)
 
-    return client_id, session_id, set(devices)
+    return session_id
 
+
+async def handle_status(request):
+    # Shows all active sessions and their locked devices
+
+    print("[SERVER] Global status dashboard request received.")
+
+    async with POOL.server_mutex:
+        POOL.check_and_reclaim_expired_locks()
+
+        sessions = [
+            {
+                "session_id": session.uuid,
+                "devices": sorted(session.devices),
+                "since": session.since,
+                "last_alive": session.last_alive,
+            }
+            for session in POOL.sessions
+        ]
+
+    return web.json_response({"sessions": sessions})
 
 async def handle_alive(request):
-    # Function to handle a alive-request from client
+    # Update the last_alive timestamp of an existing session
 
     try:
         body = await request.json()
-        client_id = body.get("client_id")
         session_id = body.get("session_id")
-
     except Exception:
-        return web.json_response({"status": "error", "message": "Malformed JSON payload"}, status=400)
-
-    if not isinstance(client_id, str) or not client_id:
-        return web.json_response({"status": "error", "message": "Missing client_id"}, status=400)
+        return web.json_response({
+            "status": "error",
+            "message": "Malformed JSON payload"
+        }, status=400)
 
     if not isinstance(session_id, str) or not session_id:
-        return web.json_response({"status": "error", "message": "Missing session_id"}, status=400)
+        return web.json_response({
+            "status": "error",
+            "message": "Missing or invalid session_id"
+        }, status=400)
 
     async with POOL.server_mutex:
-        updated = POOL.update_alive(client_id, session_id)
+        POOL.check_and_reclaim_expired_locks()
 
-    if not updated:
-        return web.json_response({"status": "error", "message": "Unknown client or session"}, status=404)
+        session = next(
+            (s for s in POOL.sessions if s.uuid == session_id),
+            None,
+        )
 
-    readable_time = datetime.fromtimestamp(updated.last_alive).strftime('%Y-%m-%d %H:%M:%S')
-    print(f"[ALIVE] Client '{client_id}' updated last_alive to {readable_time}")
-    return web.json_response({"status": "alive"})
+        if session is None:
+            print(f"[ALIVE] Unknown session: {session_id}")
+            return web.json_response({
+                "status": "error",
+                "message": "Unknown session",
+            }, status=404)
+
+        session.last_alive = time.time()
+
+    readable_time = datetime.fromtimestamp(session.last_alive).strftime('%Y-%m-%d %H:%M:%S')
+
+    print(f"[ALIVE] Session '{session_id}' updated last_alive to {readable_time}")
+
+    return web.json_response({
+        "status": "alive",
+        "session_id": session_id,
+    })
 
 async def handle_lock(request):
     # Function for locking dependencies according to "all or nothing"-principle
 
     # 1. Payload parsing & validation
-    client_id, session_id, static_raw, dynamic_raw = await parse_lock_request(request)
+    static_raw, dynamic_raw = await parse_lock_request(request)
+
+    if isinstance(static_raw, web.Response):
+        return static_raw
 
     # 2. Prepare dependencies
     static_deps = set(static_raw)
@@ -352,80 +348,44 @@ async def handle_lock(request):
         POOL.check_and_reclaim_expired_locks()
 
         # 4. Check availability & assign dependencies
-        lock_data = await POOL.resolve_and_assign_dependencies(client_id, session_id, static_deps, dynamic_options)
+        lock_data = await POOL.resolve_and_assign_dependencies(static_deps, dynamic_options)
 
     # 5. Unavailable: Return immediately without acquiring any locks
     if lock_data["status"] == "unavailable":
-        print(f"[SERVER] Some Dependencies from lock-request from '{client_id}' are unavailable. (Session: {session_id})")
+        print(f"[SERVER] Some Dependencies from lock-request are unavailable.")
         return web.json_response(lock_data, status=409)
 
     # 6. Lock successfully acquired
+    session = lock_data["session"]
     assigned_dynamic = lock_data["assigned_dynamic"]
-    concrete_deps = lock_data["concrete_deps"]
 
-    print(f"[SERVER] Lock granted to '{client_id}' for {sorted(concrete_deps)}. (Session: {session_id})")
+    print(f"[SERVER] Lock granted for {sorted(session.devices)}. (Session: {session.uuid})")
 
     # 7. Return lock confirmation
     return web.json_response({"status": "locked",
-                              "client_id": client_id,
-                              "session_id": session_id,
-                              "devices": sorted(concrete_deps),
+                              "session_id": session.uuid,
+                              "devices": sorted(session.devices),
                               "deps_assigned": assigned_dynamic})
 
 async def handle_free(request):
-    # Function for unlocking currently locked devices / dependencies
+    # Release all devices belonging to a session
 
-    # Payload parsing & validation
-    client_id, session_id, devices = await parse_free_request(request)
+    # 1. Payload parsing & validation
+    session_id = await parse_free_request(request)
 
-    # Cleanup & release locks
+    if isinstance(session_id, web.Response):
+        return session_id
+
+    # 2. Clean up expired sessions
     async with POOL.server_mutex:
         POOL.check_and_reclaim_expired_locks()
+        result = POOL.release_session(session_id)
 
-        client = POOL.clients.get(client_id)
-        if client is None:
-            return web.json_response({"status": "error",
-                                      "message": "Unknown client."},
-                                      status=404)
-
-        session_deps = client.sessions.get(session_id)
-        if session_deps is None:
-            return web.json_response({"status": "error",
-                                      "message": "Unknown session."},
-                                      status=404)
-
-        print(f"[SERVER] Request for unlocking batch {devices} received from client '{client_id}' (Session: {session_id}).")
-
-        result = POOL.release_all_locks_for_client(client_id, session_id, set(devices))
-
+    # 3. Return result
     if result["status"] == "error":
-            return web.json_response(result, status=404)
-
-    if result["status"] == "rejected":
-        return web.json_response(result, status=409)
+        return web.json_response(result, status=404)
 
     return web.json_response(result, status=200)
-
-async def handle_status(request):
-    # Function for showing which devices are locked by which user & since when
-    # Shows a CLI-Dashboard with locked devices
-    print(f"[SERVER] Global status dashboard request received. Preparing data ...")
-
-    async with POOL.server_mutex:
-        POOL.check_and_reclaim_expired_locks()
-
-        safe_active_locks = {}
-
-        for device, meta in POOL.active_locks.items():
-            if isinstance(meta, dict):
-                client_id = meta.get("client_id", "")
-
-                safe_active_locks[device] = {"device": meta.get("device"),
-                                            "client_id": client_id,
-                                            "timestamp": meta.get("timestamp")}
-
-    status_report = {"active_locks": safe_active_locks}
-    return web.json_response(status_report)
 
 
 if __name__ == "__main__":
@@ -434,7 +394,7 @@ if __name__ == "__main__":
         web.get('/status', handle_status),
         web.post('/lock', handle_lock),
         web.post('/free', handle_free),
-        web.post('/alive', handle_alive)
+        web.post('/alive', handle_alive),
     ])
     print("Medusa lock-server auf http://127.0.0.1:8080 ...")
 
