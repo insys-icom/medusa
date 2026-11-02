@@ -115,27 +115,6 @@ def send_free(session_id: str) -> bool:
     print(f"Freed dependencies: {result.get("devices", [])}")
     return True
 
-# def send_free_all(client_id: str) -> bool:
-    # Sends request to free all locks from this client
-
-    payload = {"client_id": client_id,
-               "all": True,
-              }
-
-    try:
-        response = requests.post(f"{SERVER_URL}/free", json=payload, timeout=5)
-    except requests.RequestException as exc:
-        print(f"Failed to contact lock server: {exc}")
-        return False
-
-    if response.status_code == 200:
-        result = response.json()
-        print(f"Freed all dependencies: {result["devices"]}")
-        return True
-
-    print(f"Free-all request failed: {response.status_code} {response.text}")
-    return False
-
 def free_dependencies(session_id: str) -> None:
     if send_free(session_id):
         print(f"Session '{session_id}' released.")
