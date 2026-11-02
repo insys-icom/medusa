@@ -75,12 +75,14 @@ class ServerDepManager:
         if suite in self.active_sessions:
             return False
 
+        # Convert the suite's dependencies into the format expected by the server
         payload = {
             "deps_static": sorted(suite.deps_static),
             "deps_dynamic": {name: sorted(dyn.options)
                              for name, dyn in suite.deps_dynamic.items()}
         }
 
+        # Send lock request to the server
         try:
             response = requests.post(
                 f"{self.server_url}/lock",
@@ -93,22 +95,34 @@ class ServerDepManager:
             print(f"[SERVER-DEPMGR] Lock request failed: {exc}")
             return False
 
-        # Server immediately rejects unavailable dependencies
+        # Server immediately rejects request if the required dependencies are unavailable
         if response.status_code == 409:
             return False
 
+        # Handle unexpected HTTP responses
         if response.status_code != 200:
             print(f"[SERVER-DEPMGR] Lock request failed: {response.status_code} {response.text}")
             return False
 
+        # Extract the session_id from servers lock confirmation
+        # It is required to release the session if the response turns out to be invalid
         try:
             data = response.json()
+
+            if not isinstance(data, dict):
+                raise ValueError("Lock confirmation must be a JSON object")
 
             session_id = data.get("session_id")
 
             if not isinstance(session_id, str) or not session_id:
                 raise ValueError("Missing or invalid session_id")
 
+        except (ValueError, TypeError) as exc:
+            print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
+            return False
+
+        # Validate the servers lock confirmation before updation local state
+        try:
             if data.get("status") != "locked":
                 raise ValueError(f"Unexpected lock response: {data}")
 
@@ -121,11 +135,11 @@ class ServerDepManager:
             ):
                 raise ValueError("Invalid lock confirmation fields")
 
-            # Verify that server has assigned every dynamic dependency
+            # Ensure that the server assigned every requested dynamic dependency
             if set(assigned_dynamic) != set(suite.deps_dynamic):
                 raise ValueError("Dynamic dependency assignments do not match")
 
-            # Verfiy every dynamic assignment
+            # Ensure that each assigned device is a valid option for its dependency
             for name, device in assigned_dynamic.items():
                 if(not isinstance(device, str) or device not in suite.deps_dynamic[name].options):
                     raise ValueError(f"Invalid assignment for dynamic dependency '{name}'")
@@ -133,25 +147,42 @@ class ServerDepManager:
             concrete_devices = set(devices_raw)
             expected_devices = set(suite.deps_static | set(assigned_dynamic.values()))
 
+            # Ensure that the servers device list matches the actual assignments
             if concrete_devices != expected_devices:
                 raise ValueError("Server's device list does not match its assignments")
 
+            # Ensure that the server only assigned devices belonging to this stage
             if not concrete_devices.issubset(self.all):
                 raise ValueError("Server assogmed a device outside this stage's dependencies")
 
-        except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        except (ValueError, TypeError) as exc:
             print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
+
+            # Release server-side session because its confirmation cannot be trusted
+            try:
+                free_response = requests.post(
+                    f"{self.server_url}/free",
+                    json={"session_id": session_id},
+                    timeout=5,
+                )
+
+                if free_response.status_code not in (200, 404):
+                    print(f"[SERVER-DEPMGR] Failed to release invalid session: {free_response.status_code} {free_response.text}")
+
+            except requests.RequestException as free_exc:
+                print(f"[SERVER-DEPMGR] Failed to release invalid session: {free_exc}")
+
             return False
 
-        # Apply servers dynamic assignements to the suite
+        # Apply the servers dynamic assignments to the suite
         for name, device in assigned_dynamic.items():
             suite.deps_dynamic[name].value = device
 
-        # Keep medusas local local bookkeeping in sync
+        # Keep medusas local local bookkeeping in sync with the servers assignment
         self.available.difference_update(concrete_devices)
         self.in_use.update(concrete_devices)
 
-        # Remember which devices belong to this suite
+        # Store session_id and assigned devices for later keepalive & release requests
         self.active_sessions[suite] = (session_id, concrete_devices)
 
         print(f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for session '{session_id}'.")
