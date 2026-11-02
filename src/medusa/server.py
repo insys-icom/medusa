@@ -57,7 +57,7 @@ class DepLockManager:
             None,
         )
 
-        if session_id is None:
+        if session is None:
             return {
                 "status": "error",
                 "message": "Unknown session.",
