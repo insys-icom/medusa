@@ -1,8 +1,9 @@
 import argparse
-from datetime import datetime
-import requests
 import time
+from datetime import UTC, datetime
+from typing import Any
 
+import requests
 
 SERVER_URL = "http://127.0.0.1:8080"
 
@@ -14,16 +15,24 @@ def parse_arguments():
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     lock_parser = subparsers.add_parser("lock")
-    lock_parser.add_argument("dependencies", nargs="+", help="Dependencies to lock")
+    lock_parser.add_argument(
+        "dependencies", nargs="+", help="Dependencies to lock"
+    )
 
     free_parser = subparsers.add_parser("free")
-    free_parser.add_argument("session_id", help="UUID of the session to release",)
+    free_parser.add_argument(
+        "session_id",
+        help="UUID of the session to release",
+    )
 
     subparsers.add_parser("status")
 
     return parser.parse_args()
 
-def parse_dependencies(dependencies: list[str]) -> tuple[list[str], dict[str, list[str]]]:
+
+def parse_dependencies(
+    dependencies: list[str],
+) -> tuple[list[str], dict[str, list[str]]]:
     # Parse dependency-arguments into static & dynamic dependencies
 
     static_deps = []
@@ -31,7 +40,7 @@ def parse_dependencies(dependencies: list[str]) -> tuple[list[str], dict[str, li
 
     for dep in dependencies:
         if dep.startswith("dynamic:"):
-            dynamic = dep[len("dynamic:"):]
+            dynamic = dep[len("dynamic:") :]
             name, values = dynamic.split("=", 1)
             dynamic_deps[name] = values.split(",")
         else:
@@ -40,14 +49,15 @@ def parse_dependencies(dependencies: list[str]) -> tuple[list[str], dict[str, li
     return static_deps, dynamic_deps
 
 
-def send_lock(static_deps: list[str], dynamic_deps: dict[str, set[str]]) -> str | None:
+def send_lock(
+    static_deps: list[str], dynamic_deps: dict[str, list[str]]
+) -> str | None:
     # Send lock-request to server and returns the session_id
 
-    payload = {
+    payload: dict[str, Any] = {
         "deps_static": static_deps,
         "deps_dynamic": {
-            name: sorted(options)
-            for name, options in dynamic_deps.items()
+            name: sorted(options) for name, options in dynamic_deps.items()
         },
     }
 
@@ -62,7 +72,7 @@ def send_lock(static_deps: list[str], dynamic_deps: dict[str, set[str]]) -> str 
         return None
 
     data = response.json()
-    session_id  = data.get("session_id")
+    session_id = data.get("session_id")
     devices_locked = data.get("devices", [])
     dynamic_locked = data.get("deps_assigned", [])
 
@@ -75,6 +85,7 @@ def send_lock(static_deps: list[str], dynamic_deps: dict[str, set[str]]) -> str 
     print(f"- dynamic: {dynamic_locked}")
 
     return session_id
+
 
 def lock_dependencies(dependencies: list[str]) -> None:
     static_deps, dynamic_deps = parse_dependencies(dependencies)
@@ -93,7 +104,9 @@ def lock_dependencies(dependencies: list[str]) -> None:
         if send_free(session_id):
             print(f"Session '{session_id}' released.")
         else:
-            print(f"Could not release session '{session_id}'. The server wukk reclaim it after timeout.")
+            print(
+                f"Could not release session '{session_id}'. The server wukk reclaim it after timeout."
+            )
 
 
 def send_free(session_id: str) -> bool:
@@ -112,8 +125,9 @@ def send_free(session_id: str) -> bool:
         return False
 
     result = response.json()
-    print(f"Freed dependencies: {result.get("devices", [])}")
+    print(f"Freed dependencies: {result.get('devices', [])}")
     return True
+
 
 def free_dependencies(session_id: str) -> None:
     if send_free(session_id):
@@ -140,6 +154,7 @@ def show_status():
 
     print_status(data)
 
+
 def print_status(data: dict):
     # Print active sessions and their locked devices
 
@@ -149,13 +164,19 @@ def print_status(data: dict):
         print("No active locks.")
         return
 
-    print("==================================== ACTIVE LOCKS ====================================")
+    print(
+        "==================================== ACTIVE LOCKS ===================================="
+    )
     print(f"{'DEVICE':<15} {'SESSION':<40} {'SINCE':<15} {'LAST ALIVE'}")
 
     for session in sessions:
         session_id = session["session_id"]
-        since = datetime.fromtimestamp(session["since"]).strftime("%H:%M:%S")
-        last_alive = datetime.fromtimestamp(session["last_alive"]).strftime("%H:%M:%S")
+        since = datetime.fromtimestamp(
+            session["since"], tz=UTC
+        ).strftime("%H:%M:%S")
+        last_alive = datetime.fromtimestamp(
+            session["last_alive"], tz=UTC
+        ).strftime("%H:%M:%S")
 
         for device in session["devices"]:
             print(f"{device:<15} {session_id:<40} {since:<15} {last_alive}")
@@ -167,7 +188,11 @@ def send_keepalive(session_id: str) -> bool | None:
     payload = {"session_id": session_id}
 
     try:
-        response = requests.post(f"{SERVER_URL}/alive", json=payload, timeout=5,)
+        response = requests.post(
+            f"{SERVER_URL}/alive",
+            json=payload,
+            timeout=5,
+        )
     except requests.RequestException as exc:
         print(f"Keepalive failed: {exc}")
         return False
@@ -182,6 +207,7 @@ def send_keepalive(session_id: str) -> bool | None:
 
     return True
 
+
 def keepalive_loop(session_id: str):
     # Keep the session alive while it owns locks
 
@@ -195,7 +221,9 @@ def keepalive_loop(session_id: str):
             break
 
         if not result:
-            print(f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})")
+            print(
+                f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})"
+            )
             break
 
 

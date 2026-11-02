@@ -15,8 +15,8 @@ if TYPE_CHECKING:
     from .settings import Settings
 
 from .cli import (
-    lock_dependencies,
     free_dependencies,
+    lock_dependencies,
     show_status,
 )
 

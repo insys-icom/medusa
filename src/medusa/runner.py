@@ -1,15 +1,15 @@
 import datetime
-import json
 import logging
 import multiprocessing
 import multiprocessing.connection
 import os
-import requests
 import signal
 import sys
 import threading
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
+
+import requests
 
 from .robot import run_suite
 from .suite import Result, Status
@@ -58,8 +58,10 @@ SIGNAL_MONITOR = _SignalMonitor()
 
 
 class ServerDepManager:
-    def __init__(self, stage:"Stage", server_url="http://127.0.0.1:8080"):
-        all_deps: set[str] = set(stage.deps_static_cnt).union(stage.deps_dynamic_cnt)
+    def __init__(self, stage: "Stage", server_url="http://127.0.0.1:8080"):
+        all_deps: set[str] = set(stage.deps_static_cnt).union(
+            stage.deps_dynamic_cnt
+        )
         self.all = frozenset(all_deps)
         self.available = set(all_deps)
         self.in_use: set[str] = set()
@@ -76,20 +78,23 @@ class ServerDepManager:
             return False
 
         # Convert the suite's dependencies into the format expected by the server
-        payload = {
+        payload: dict[str, Any] = {
             "deps_static": sorted(suite.deps_static),
-            "deps_dynamic": {name: sorted(dyn.options)
-                             for name, dyn in suite.deps_dynamic.items()}
+            "deps_dynamic": {
+                name: sorted(dyn.options)
+                for name, dyn in suite.deps_dynamic.items()
+            },
         }
 
         # Send lock request to the server
         try:
             response = requests.post(
-                f"{self.server_url}/lock",
-                json=payload,
-                timeout=5
+                f"{self.server_url}/lock", json=payload, timeout=5
             )
-            print(f"[DEBUG] HTTP response received: {response.status_code}", flush=True)
+            print(
+                f"[DEBUG] HTTP response received: {response.status_code}",
+                flush=True,
+            )
 
         except requests.RequestException as exc:
             print(f"[SERVER-DEPMGR] Lock request failed: {exc}")
@@ -101,7 +106,9 @@ class ServerDepManager:
 
         # Handle unexpected HTTP responses
         if response.status_code != 200:
-            print(f"[SERVER-DEPMGR] Lock request failed: {response.status_code} {response.text}")
+            print(
+                f"[SERVER-DEPMGR] Lock request failed: {response.status_code} {response.text}"
+            )
             return False
 
         # Extract the session_id from servers lock confirmation
@@ -110,7 +117,7 @@ class ServerDepManager:
             data = response.json()
 
             if not isinstance(data, dict):
-                raise ValueError("Lock confirmation must be a JSON object")
+                raise TypeError("Lock confirmation must be a JSON object")
 
             session_id = data.get("session_id")
 
@@ -129,7 +136,8 @@ class ServerDepManager:
             assigned_dynamic = data.get("deps_assigned")
             devices_raw = data.get("devices")
 
-            if (not isinstance(assigned_dynamic, dict)
+            if (
+                not isinstance(assigned_dynamic, dict)
                 or not isinstance(devices_raw, list)
                 or any(not isinstance(device, str) for device in devices_raw)
             ):
@@ -141,19 +149,30 @@ class ServerDepManager:
 
             # Ensure that each assigned device is a valid option for its dependency
             for name, device in assigned_dynamic.items():
-                if(not isinstance(device, str) or device not in suite.deps_dynamic[name].options):
-                    raise ValueError(f"Invalid assignment for dynamic dependency '{name}'")
+                if (
+                    not isinstance(device, str)
+                    or device not in suite.deps_dynamic[name].options
+                ):
+                    raise ValueError(
+                        f"Invalid assignment for dynamic dependency '{name}'"
+                    )
 
             concrete_devices = set(devices_raw)
-            expected_devices = set(suite.deps_static | set(assigned_dynamic.values()))
+            expected_devices = set(
+                suite.deps_static | set(assigned_dynamic.values())
+            )
 
             # Ensure that the servers device list matches the actual assignments
             if concrete_devices != expected_devices:
-                raise ValueError("Server's device list does not match its assignments")
+                raise ValueError(
+                    "Server's device list does not match its assignments"
+                )
 
             # Ensure that the server only assigned devices belonging to this stage
             if not concrete_devices.issubset(self.all):
-                raise ValueError("Server assogmed a device outside this stage's dependencies")
+                raise ValueError(
+                    "Server assogmed a device outside this stage's dependencies"
+                )
 
         except (ValueError, TypeError) as exc:
             print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
@@ -167,10 +186,14 @@ class ServerDepManager:
                 )
 
                 if free_response.status_code not in (200, 404):
-                    print(f"[SERVER-DEPMGR] Failed to release invalid session: {free_response.status_code} {free_response.text}")
+                    print(
+                        f"[SERVER-DEPMGR] Failed to release invalid session: {free_response.status_code} {free_response.text}"
+                    )
 
             except requests.RequestException as free_exc:
-                print(f"[SERVER-DEPMGR] Failed to release invalid session: {free_exc}")
+                print(
+                    f"[SERVER-DEPMGR] Failed to release invalid session: {free_exc}"
+                )
 
             return False
 
@@ -185,7 +208,9 @@ class ServerDepManager:
         # Store session_id and assigned devices for later keepalive & release requests
         self.active_sessions[suite] = (session_id, concrete_devices)
 
-        print(f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for session '{session_id}'.")
+        print(
+            f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for session '{session_id}'."
+        )
         return True
 
     def free(self, suite: "Suite"):
@@ -203,13 +228,17 @@ class ServerDepManager:
         payload = {"session_id": session_id}
 
         try:
-            response = requests.post(f"{self.server_url}/free", json=payload, timeout=5)
+            response = requests.post(
+                f"{self.server_url}/free", json=payload, timeout=5
+            )
         except requests.RequestException as exc:
             print(f"[SERVER-DEPMGR] Failed to release session: {exc}")
             return
 
         if response.status_code not in (200, 404):
-            print(f"[SERVER-DEPMGR] Server rejected free request: {response.status_code} {response.text}")
+            print(
+                f"[SERVER-DEPMGR] Server rejected free request: {response.status_code} {response.text}"
+            )
             return
 
         # Server successfully released the session or it no longer exists on the server
@@ -220,31 +249,40 @@ class ServerDepManager:
         self.available.update(devices)
         self.in_use.difference_update(devices)
 
-        print(f"[SERVER-DEPMGR] Released {sorted(devices)} for session '{session_id}'.")
+        print(
+            f"[SERVER-DEPMGR] Released {sorted(devices)} for session '{session_id}'."
+        )
 
     def send_keepalive(self):
         # Send one keepalive-request to server
 
         with self._state_lock:
             sessions = [
-                session_id
-                for session_id, _ in self.active_sessions.values()
+                session_id for session_id, _ in self.active_sessions.values()
             ]
 
             for session_id in sessions:
                 payload = {"session_id": session_id}
 
                 try:
-                    response = requests.post(f"{self.server_url}/alive", json=payload, timeout=5)
+                    response = requests.post(
+                        f"{self.server_url}/alive", json=payload, timeout=5
+                    )
                 except requests.RequestException as exc:
-                    print(f"[SERVER-DEPMGR] Keepalive failed for session '{session_id}': {exc}")
+                    print(
+                        f"[SERVER-DEPMGR] Keepalive failed for session '{session_id}': {exc}"
+                    )
                     continue
 
                 if response.status_code != 200:
-                    print(f"[SERVER-DEPMGR] Keepalive rejected for session '{session_id}': {response.status_code} {response.text}")
+                    print(
+                        f"[SERVER-DEPMGR] Keepalive rejected for session '{session_id}': {response.status_code} {response.text}"
+                    )
                     continue
 
-                print(f"[SERVER-DEPMGR] Keepalive sent for session '{session_id}'.")
+                print(
+                    f"[SERVER-DEPMGR] Keepalive sent for session '{session_id}'."
+                )
 
 
 @dataclass
