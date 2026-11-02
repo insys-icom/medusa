@@ -8,8 +8,6 @@ import requests
 import signal
 import sys
 import threading
-import time
-import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
