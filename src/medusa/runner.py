@@ -66,21 +66,18 @@ class ServerDepManager:
         self.available = set(all_deps)
         self.in_use: set[str] = set()
 
-        self.pending_locks = {}
+        self.active_sessions: dict[Suite, tuple[str, set[str]]] = {}
         self._state_lock = threading.Lock()
-
         self.server_url = server_url
-        self.client_id = str(uuid.uuid4())
 
     def try_lock(self, suite: "Suite") -> bool:
         # Ask server to lock & assign the suite's dependencies
 
         # Do not create another lock session for an already locked suite
-        if suite in self.pending_locks:
+        if suite in self.active_sessions:
             return False
 
         payload = {
-            "client_id": self.client_id,
             "deps_static": sorted(suite.deps_static),
             "deps_dynamic": {name: sorted(dyn.options)
                              for name, dyn in suite.deps_dynamic.items()}
@@ -90,7 +87,8 @@ class ServerDepManager:
             response = requests.post(
                 f"{self.server_url}/lock",
                 json=payload,
-                timeout=5)
+                timeout=5
+            )
             print(f"[DEBUG] HTTP response received: {response.status_code}", flush=True)
 
         except requests.RequestException as exc:
@@ -107,6 +105,11 @@ class ServerDepManager:
 
         try:
             data = response.json()
+
+            session_id = data.get("session_id")
+
+            if not isinstance(session_id, str) or not session_id:
+                raise ValueError("Missing or invalid session_id")
 
             if data.get("status") != "locked":
                 raise ValueError(f"Unexpected lock response: {data}")
@@ -151,61 +154,68 @@ class ServerDepManager:
         self.in_use.update(concrete_devices)
 
         # Remember which devices belong to this suite
-        self.pending_locks[suite] = concrete_devices
+        self.active_sessions[suite] = (session_id, concrete_devices)
 
-        print(f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for client '{self.client_id}'.")
+        print(f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for session '{session_id}'.")
         return True
 
     def free(self, suite: "Suite"):
         # Release the suites dependencies
 
-        devices = self.pending_locks.get(suite, None)
+        with self._state_lock:
+            session_data = self.active_sessions.get(suite)
 
-        if devices is None:
-            print(f"[SERVER-DEPMGR] No active lock found for '{suite}'.")
+        if session_data is None:
+            print(f"[SERVER-DEPMGR] No active sessions found for '{suite}'.")
             return
 
-        payload = {"client_id": self.client_id,
-                   "devices": sorted(devices)}
+        session_id, devices = session_data
+
+        payload = {"session_id": session_id}
 
         try:
-            response = requests.post(f"{self.server_url}/free",
-                                        json=payload,
-                                        timeout=5)
+            response = requests.post(f"{self.server_url}/free", json=payload, timeout=5)
         except requests.RequestException as exc:
-            print(f"[SERVER-DEPMGR] Failed to release locks: {exc}")
+            print(f"[SERVER-DEPMGR] Failed to release session: {exc}")
             return
 
-        if response.status_code != 200:
-            print(f"[SERVER-DEPMGR] Server rejected unlock request: {response.status_code} {response.text}")
+        if response.status_code not in (200, 404):
+            print(f"[SERVER-DEPMGR] Server rejected free request: {response.status_code} {response.text}")
             return
 
-        # Server successfully released the locks
-        self.pending_locks.pop(suite)
+        # Server successfully released the session or it no longer exists on the server
+        with self._state_lock:
+            self.active_sessions.pop(suite, None)
 
         # Keep Medusa's local bookkeeping in sync
         self.available.update(devices)
         self.in_use.difference_update(devices)
 
-        print(f"[SERVER-DEPMGR] Released {sorted(devices)} for client '{self.client_id}'.")
+        print(f"[SERVER-DEPMGR] Released {sorted(devices)} for session '{session_id}'.")
 
     def send_keepalive(self):
-        # Sends one keepalive-request
+        # Send one keepalive-request to server
 
-        try:
-            response = requests.post(f"{self.server_url}/alive",
-                                     json={"client_id": self.client_id},
-                                     timeout=5)
-        except requests.RequestException as exc:
-            print(f"[SERVER-DEPMGR] Keepalive failed: {exc}")
-            return False
+        with self._state_lock:
+            sessions = [
+                session_id
+                for session_id, _ in self.active_sessions.values()
+            ]
 
-        if response.status_code != 200:
-            print(f"[SERVER-DEPMGR] Keepalive rejected: {response.status_code} {response.text}")
-            return False
+            for session_id in sessions:
+                payload = {"session_id": session_id}
 
-        print(f"[SERVER-DEPMGR] Keepalive sent for '{self.client_id}'")
-        return True
+                try:
+                    response = requests.post(f"{self.server_url}/alive", json=payload, timeout=5)
+                except requests.RequestException as exc:
+                    print(f"[SERVER-DEPMGR] Keepalive failed for session '{session_id}': {exc}")
+                    continue
+
+                if response.status_code != 200:
+                    print(f"[SERVER-DEPMGR] Keepalive rejected for session '{session_id}': {response.status_code} {response.text}")
+                    continue
+
+                print(f"[SERVER-DEPMGR] Keepalive sent for session '{session_id}'.")
 
 
 @dataclass
@@ -417,7 +427,7 @@ class Runner:
                         change_happened = True
 
             # Send keepalive while locks are active
-            if self.depmgr.pending_locks:
+            if self.depmgr.active_sessions:
                 self.depmgr.send_keepalive()
 
             if change_happened:
