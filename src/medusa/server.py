@@ -106,7 +106,7 @@ class DepLockManager:
             for device, dep_name in option_owner.items()
         }
 
-    async def resolve_and_assign_dependencies(self, static_deps: set[str], dynamic_raw: dict[str, set[str]]) -> dict:
+    def resolve_and_assign_dependencies(self, static_deps: set[str], dynamic_raw: dict[str, set[str]]) -> dict:
         # Resolve dependencies and create a session if all devices are available
 
         print(f"[SERVER] Lock request received: static={sorted(static_deps)}, dynamic={dynamic_raw}")
@@ -137,13 +137,7 @@ class DepLockManager:
         assigned_dynamic = self.resolve_dynamic_dependencies(available_options)
 
         if assigned_dynamic is None:
-            unavailable_dependencies = [
-                name
-                for name, options in available_options.items()
-                if not options
-            ]
-
-            unavailable_message = (f"No available devices for dynamic dependencies: {unavailable_dependencies}")
+            unavailable_message = (f"No distinct set of devices satisfies all dynamic dependencies.")
             return {
                 "status": "unavailable",
                 "message": unavailable_message,
@@ -348,7 +342,7 @@ async def handle_lock(request):
         POOL.check_and_reclaim_expired_locks()
 
         # 4. Check availability & assign dependencies
-        lock_data = await POOL.resolve_and_assign_dependencies(static_deps, dynamic_options)
+        lock_data = POOL.resolve_and_assign_dependencies(static_deps, dynamic_options)
 
     # 5. Unavailable: Return immediately without acquiring any locks
     if lock_data["status"] == "unavailable":
