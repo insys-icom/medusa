@@ -38,7 +38,9 @@ Subcommands:
                  all information by default, see -s if you want less output.
   lock           Lock dependencies using the lock server.
   free           Release a lock session.
-  status         Show currently active lock sessions.
+  status         Show currently active sessions. For each session status shows
+                 which dependencies are locked, since when they are locked and
+                 when the last keepalive-request arrived.
   version        Show Medusa version.
 
 Arguments:
@@ -126,7 +128,7 @@ HELP_LOCK = """Lock:
   Usage:
     medusa lock DEVICES...
 
-  DEVICES con contain static dependencies or dynamic dependencies.
+  DEVICES can contain static dependencies or dynamic dependencies.
 
   Dynamic dependencies usw the following format:
     dynamic:NAME=DEVICE1,DEVICE2
@@ -137,29 +139,22 @@ HELP_LOCK = """Lock:
     medusa lock device1 dynamic:deviceGroup=device2,device3
 
   The command remains active while the lock is held and sends periodic
-  keepalive requests to the server.
+  keepalive requests to the server. Press Ctrl+C to release the locks.
 """
 
 HELP_FREE = """Free:
-  Release all dependencies belonging to a lock session.
+  Release dependencies belonging to a lock session or release all locks.
 
   Usage:
     medusa free UUID
+    medusa free --all
 
-  UUID is the session ID returned by the lock command.
+  UUID is the session ID as shown in the medusa status command.
+  --all releases all locks from all sessions on the server.
 
-  Example:
+  Examples:
     medusa free 123e4567-e89b-12d3-a456-426614174000
-"""
-
-HELP_STATUS = """Status:
-  Display all currently active lock sessions and their locked dependencies.
-
-  Usage:
-    medusa status
-
-  Example:
-    medusa status
+    medusa free --all
 """
 
 
@@ -183,8 +178,6 @@ def main() -> None:
                 print(HELP_LOCK)
             elif arguments["free"]:
                 print(HELP_FREE)
-            elif arguments["status"]:
-                print(HELP_STATUS)
             else:
                 print(HELP)
         elif arguments["version"]:
