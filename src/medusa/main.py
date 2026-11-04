@@ -25,6 +25,7 @@ HELP = f"""Medusa: Run Robot Framework suites with depdendency-aware paralleliza
 Usage:
   medusa run [-v] [-d OUTPUTDIR] [-f FILTER]... [-t TIMEOUT] [--] ROBOTARGS...
   medusa stats [-v] [-f FILTER]... [-s SELECTION] [--] ROBOTARGS...
+  medusa server
   medusa lock DEVICES...
   medusa free UUID
   medusa status
@@ -36,6 +37,7 @@ Subcommands:
   run            Run the given robot suite(s).
   stats          Display information about the given robot suite(s). Outputs
                  all information by default, see -s if you want less output.
+  server         Start the Medusa lock server.
   lock           Lock dependencies using the lock server.
   free           Release a lock session.
   status         Show currently active sessions. For each session status shows
@@ -130,7 +132,7 @@ HELP_LOCK = """Lock:
 
   DEVICES can contain static dependencies or dynamic dependencies.
 
-  Dynamic dependencies usw the following format:
+  Dynamic dependencies use the following format:
     dynamic:NAME=DEVICE1,DEVICE2
 
   Examples:
@@ -147,14 +149,11 @@ HELP_FREE = """Free:
 
   Usage:
     medusa free UUID
-    medusa free --all
 
   UUID is the session ID as shown in the medusa status command.
-  --all releases all locks from all sessions on the server.
 
-  Examples:
+  Example:
     medusa free 123e4567-e89b-12d3-a456-426614174000
-    medusa free --all
 """
 
 
@@ -190,6 +189,10 @@ def main() -> None:
             free_dependencies(arguments["UUID"])
         elif arguments["status"]:
             show_status()
+        elif arguments["server"]:
+            from .server import start_server
+
+            start_server()
         else:
             from pathlib import Path
 
