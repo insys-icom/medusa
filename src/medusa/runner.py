@@ -58,24 +58,34 @@ SIGNAL_MONITOR = _SignalMonitor()
 
 
 class ServerDepManager:
+    """Manages server-side dependency locking for test suites."""
+
     def __init__(self, stage: "Stage", server_url="http://127.0.0.1:8080"):
+        """Initialize the server dependency manager with the given stage and server URL."""
+
         all_deps: set[str] = set(stage.deps_static_cnt).union(
             stage.deps_dynamic_cnt
         )
         self.all = frozenset(all_deps)
-        self.available = set(all_deps)
-        self.in_use: set[str] = set()
 
         self.active_sessions: dict[Suite, tuple[str, set[str]]] = {}
         self._state_lock = threading.Lock()
         self.server_url = server_url
 
     def try_lock(self, suite: "Suite") -> bool:
-        # Ask server to lock & assign the suite's dependencies
+        """Ask server to lock & assign the suite's dependencies"""
 
-        # Do not create another lock session for an already locked suite
-        if suite in self.active_sessions:
-            return False
+        # Get the existing session, if the suite already has one
+        with self._state_lock:
+            session_data = self.active_sessions.get(suite)
+
+        existing_devices: set[str]
+
+        if session_data is None:
+            session_id = None
+            existing_devices = set()
+        else:
+            session_id, existing_devices = session_data
 
         # Convert the suite's dependencies into the format expected by the server
         payload: dict[str, Any] = {
@@ -86,6 +96,10 @@ class ServerDepManager:
             },
         }
 
+        # Include the session_id to extent an existing session
+        if session_id is not None:
+            payload["session_id"] = session_id
+
         # Send lock request to the server
         try:
             response = requests.post(
@@ -95,13 +109,18 @@ class ServerDepManager:
                 f"[DEBUG] HTTP response received: {response.status_code}",
                 flush=True,
             )
-
         except requests.RequestException as exc:
             print(f"[SERVER-DEPMGR] Lock request failed: {exc}")
             return False
 
         # Server immediately rejects request if the required dependencies are unavailable
         if response.status_code == 409:
+            return False
+
+        if response.status_code == 404 and session_id is not None:
+            print(
+                f"[SERVER-DEPMGR] Session '{session_id}' no longer exists on the server."
+            )
             return False
 
         # Handle unexpected HTTP responses
@@ -119,16 +138,25 @@ class ServerDepManager:
             if not isinstance(data, dict):
                 raise TypeError("Lock confirmation must be a JSON object")
 
-            session_id = data.get("session_id")
+            returned_session_id = data.get("session_id")
 
-            if not isinstance(session_id, str) or not session_id:
+            if (
+                not isinstance(returned_session_id, str)
+                or not returned_session_id
+            ):
                 raise ValueError("Missing or invalid session_id")
+
+            # The server must return the same session_id when extending a session
+            if session_id is not None and returned_session_id != session_id:
+                raise ValueError("Server returned a different session_id")
+
+            session_id = returned_session_id
 
         except (ValueError, TypeError) as exc:
             print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
             return False
 
-        # Validate the servers lock confirmation before updation local state
+        # Validate the servers lock confirmation before updating local state
         try:
             if data.get("status") != "locked":
                 raise ValueError(f"Unexpected lock response: {data}")
@@ -158,9 +186,13 @@ class ServerDepManager:
                     )
 
             concrete_devices = set(devices_raw)
-            expected_devices = set(
+
+            # The server returns all devices belonging to the same session,
+            # including devices locked by earlier requests
+            requested_devices = set(
                 suite.deps_static | set(assigned_dynamic.values())
             )
+            expected_devices = existing_devices | requested_devices
 
             # Ensure that the servers device list matches the actual assignments
             if concrete_devices != expected_devices:
@@ -177,23 +209,24 @@ class ServerDepManager:
         except (ValueError, TypeError) as exc:
             print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
 
-            # Release server-side session because its confirmation cannot be trusted
-            try:
-                free_response = requests.post(
-                    f"{self.server_url}/free",
-                    json={"session_id": session_id},
-                    timeout=5,
-                )
-
-                if free_response.status_code not in (200, 404):
-                    print(
-                        f"[SERVER-DEPMGR] Failed to release invalid session: {free_response.status_code} {free_response.text}"
+            # Release newly created session if confirmation is invalid
+            if not existing_devices:
+                try:
+                    free_response = requests.post(
+                        f"{self.server_url}/free",
+                        json={"session_id": session_id},
+                        timeout=5,
                     )
 
-            except requests.RequestException as free_exc:
-                print(
-                    f"[SERVER-DEPMGR] Failed to release invalid session: {free_exc}"
-                )
+                    if free_response.status_code not in (200, 404):
+                        print(
+                            f"[SERVER-DEPMGR] Failed to release invalid session: {free_response.status_code} {free_response.text}"
+                        )
+
+                except requests.RequestException as free_exc:
+                    print(
+                        f"[SERVER-DEPMGR] Failed to release invalid session: {free_exc}"
+                    )
 
             return False
 
@@ -201,20 +234,21 @@ class ServerDepManager:
         for name, device in assigned_dynamic.items():
             suite.deps_dynamic[name].value = device
 
-        # Keep medusas local local bookkeeping in sync with the servers assignment
-        self.available.difference_update(concrete_devices)
-        self.in_use.update(concrete_devices)
-
         # Store session_id and assigned devices for later keepalive & release requests
-        self.active_sessions[suite] = (session_id, concrete_devices)
+        with self._state_lock:
+            self.active_sessions[suite] = (session_id, concrete_devices)
 
         print(
             f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for session '{session_id}'."
         )
         return True
 
-    def free(self, suite: "Suite"):
-        # Release the suites dependencies
+    def free(
+        self,
+        suite: "Suite",
+        devices: set[str] | None = None,
+    ) -> None:
+        """Release all or selected dependencies of a suite"""
 
         with self._state_lock:
             session_data = self.active_sessions.get(suite)
@@ -223,9 +257,33 @@ class ServerDepManager:
             print(f"[SERVER-DEPMGR] No active sessions found for '{suite}'.")
             return
 
-        session_id, devices = session_data
+        session_id, session_devices = session_data
+        session_devices = set(session_devices)
+        close_session = devices is None
 
-        payload = {"session_id": session_id}
+        # Determine which devices should be released
+        if devices is None:
+            devices_to_free = set(session_devices)
+        else:
+            devices_to_free = set(devices)
+
+        if not close_session and not devices_to_free:
+            print(
+                f"[SERVER-DEPMGR] No devices to release for sessuib '{session_id}'."
+            )
+            return
+
+        if not devices_to_free.issubset(session_devices):
+            print(
+                f"[SERVER-DEPMGR] Cannot release devices not owned by session '{session_id}': "
+                f"{sorted(devices_to_free - session_devices)}"
+            )
+            return
+
+        payload: dict[str, Any] = {"session_id": session_id}
+
+        if not close_session:
+            payload["devices"] = sorted(devices_to_free)
 
         try:
             response = requests.post(
@@ -241,48 +299,109 @@ class ServerDepManager:
             )
             return
 
-        # Server successfully released the session or it no longer exists on the server
-        with self._state_lock:
-            self.active_sessions.pop(suite, None)
+        # If the session no longer exists on the server
+        # consider all locally tracked devices released
+        if response.status_code == 404:
+            devices_to_free = set(session_devices)
 
-        # Keep Medusa's local bookkeeping in sync
-        self.available.update(devices)
-        self.in_use.difference_update(devices)
+        # Update local session bookkeeping
+        remaining_devices = session_devices - devices_to_free
+
+        # Keep the session_id even if no devices remain
+        with self._state_lock:
+            if close_session:
+                self.active_sessions.pop(suite, None)
+            else:
+                self.active_sessions[suite] = (session_id, remaining_devices)
 
         print(
-            f"[SERVER-DEPMGR] Released {sorted(devices)} for session '{session_id}'."
+            f"[SERVER-DEPMGR] Released {sorted(devices_to_free)} for session '{session_id}'."
         )
 
     def send_keepalive(self):
-        # Send one keepalive-request to server
+        """Send one keepalive-request to server"""
 
+        # Take a snapshot of the active session IDs
         with self._state_lock:
             sessions = [
                 session_id for session_id, _ in self.active_sessions.values()
             ]
 
-            for session_id in sessions:
-                payload = {"session_id": session_id}
+        # Send keepalive requests without holding the state lock
+        for session_id in sessions:
+            payload = {"session_id": session_id}
 
-                try:
-                    response = requests.post(
-                        f"{self.server_url}/alive", json=payload, timeout=5
-                    )
-                except requests.RequestException as exc:
-                    print(
-                        f"[SERVER-DEPMGR] Keepalive failed for session '{session_id}': {exc}"
-                    )
-                    continue
-
-                if response.status_code != 200:
-                    print(
-                        f"[SERVER-DEPMGR] Keepalive rejected for session '{session_id}': {response.status_code} {response.text}"
-                    )
-                    continue
-
-                print(
-                    f"[SERVER-DEPMGR] Keepalive sent for session '{session_id}'."
+            try:
+                response = requests.post(
+                    f"{self.server_url}/alive", json=payload, timeout=5
                 )
+            except requests.RequestException as exc:
+                print(
+                    f"[SERVER-DEPMGR] Keepalive failed for session '{session_id}': {exc}"
+                )
+                continue
+
+            if response.status_code != 200:
+                print(
+                    f"[SERVER-DEPMGR] Keepalive rejected for session '{session_id}': {response.status_code} {response.text}"
+                )
+                continue
+
+            print(
+                f"[SERVER-DEPMGR] Keepalive sent for session '{session_id}'."
+            )
+
+    def finish_session(self, suite: "Suite") -> None:
+        """Release all devices and terminate the session"""
+
+        with self._state_lock:
+            session_data = self.active_sessions.pop(suite, None)
+
+        if session_data is None:
+            return
+
+        session_id, devices = session_data
+
+        try:
+            response = requests.post(
+                f"{self.server_url}/free",
+                json={"session_id": session_id},
+                timeout=5,
+            )
+        except requests.RequestException as exc:
+            print(
+                f"[SERVER-DEPMGR] Failed to finish session "
+                f"'{session_id}': {exc}"
+            )
+            return
+
+        if response.status_code not in (200, 404):
+            print(
+                f"[SERVER-DEPMGR] Server rejected session termination: "
+                f"{response.status_code} {response.text}"
+            )
+            return
+
+        # Remove the session from local bookkeeping
+        with self._state_lock:
+            self.active_sessions.pop(suite, None)
+
+        print(
+            f"[SERVER-DEPMGR] Finished session {session_id} with devices {sorted(devices)}"
+        )
+
+    def get_session_devices(self, suite: "Suite") -> set[str]:
+        """Return the devices currently assigned to a suite's session."""
+
+        with self._state_lock:
+            session_data = self.active_sessions.get(suite)
+
+        if session_data is None:
+            return set()
+
+        _, devices = session_data
+
+        return set(devices)
 
 
 @dataclass
@@ -479,7 +598,16 @@ class Runner:
 
             # Process finished suites
             for suite in self.procmgr.get_finished_suites(retry=retry):
-                self.depmgr.free(suite)
+                # Get the devices currently assigned to this suite
+                devices = self.depmgr.get_session_devices(suite)
+
+                # Release all devices, but keep the session alive
+                self.depmgr.free(suite, devices)
+
+                # Finish the session if no retry is pending
+                if suite.result != Result.FAIL or suite.retry <= 0:
+                    self.depmgr.finish_session(suite)
+
                 change_happened = True
 
             # Start pending suites
