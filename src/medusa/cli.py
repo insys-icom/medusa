@@ -9,7 +9,8 @@ SERVER_URL = "http://127.0.0.1:8080"
 
 
 def parse_arguments():
-    # Parses arguments
+    """Parses arguments"""
+
     parser = argparse.ArgumentParser(description="Medusa lock-server CLI")
 
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -52,7 +53,7 @@ def parse_dependencies(
 def send_lock(
     static_deps: list[str], dynamic_deps: dict[str, list[str]]
 ) -> str | None:
-    # Send lock-request to server and returns the session_id
+    """Send lock-request to server and returns the session_id"""
 
     payload: dict[str, Any] = {
         "deps_static": static_deps,
@@ -88,6 +89,8 @@ def send_lock(
 
 
 def lock_dependencies(dependencies: list[str]) -> None:
+    """Lock the specified dependencies and maintain the session alive until interrupted."""
+
     static_deps, dynamic_deps = parse_dependencies(dependencies)
     session_id = send_lock(static_deps, dynamic_deps)
 
@@ -105,12 +108,12 @@ def lock_dependencies(dependencies: list[str]) -> None:
             print(f"Session '{session_id}' released.")
         else:
             print(
-                f"Could not release session '{session_id}'. The server wukk reclaim it after timeout."
+                f"Could not release session '{session_id}'. The server will reclaim it after timeout."
             )
 
 
 def send_free(session_id: str) -> bool:
-    # Sends release-request for locked dependencies
+    """Sends release-request for locked dependencies"""
 
     payload = {"session_id": session_id}
 
@@ -130,12 +133,15 @@ def send_free(session_id: str) -> bool:
 
 
 def free_dependencies(session_id: str) -> None:
+    """Free the specified devices of a session by sending a release request to the server."""
+
     if send_free(session_id):
         print(f"Session '{session_id}' released.")
 
 
 def show_status():
-    # Send status-request and print current server status
+    """Send status-request and print current server status"""
+
     try:
         response = requests.get(f"{SERVER_URL}/status", timeout=5)
     except requests.RequestException as exc:
@@ -156,7 +162,7 @@ def show_status():
 
 
 def print_status(data: dict):
-    # Print active sessions and their locked devices
+    """Print active sessions and their locked devices"""
 
     sessions = data.get("sessions", [])
 
@@ -165,25 +171,37 @@ def print_status(data: dict):
         return
 
     print(
-        "==================================== ACTIVE LOCKS ===================================="
+        "============================== ACTIVE LOCKS =============================="
     )
-    print(f"{'DEVICE':<15} {'SESSION':<40} {'SINCE':<15} {'LAST ALIVE'}")
+    print(f"{'SESSION':<38} {'DEVICES':<10} {'SINCE':<12} {'LAST ALIVE'}")
+    print("=" * 74)  # Devider
 
     for session in sessions:
         session_id = session["session_id"]
-        since = datetime.fromtimestamp(
-            session["since"], tz=UTC
-        ).strftime("%H:%M:%S")
+
+        since = datetime.fromtimestamp(session["since"], tz=UTC).strftime(
+            "%H:%M:%S"
+        )
+
         last_alive = datetime.fromtimestamp(
             session["last_alive"], tz=UTC
         ).strftime("%H:%M:%S")
 
-        for device in session["devices"]:
-            print(f"{device:<15} {session_id:<40} {since:<15} {last_alive}")
+        devices = session["devices"]
+
+        for index, device in enumerate(devices):
+            if index == 0:
+                print(
+                    f"{session_id:<38} {device:<10} {since:<12} {last_alive}"
+                )
+            else:
+                print(f"{'':<38} {device:<10} {'':<12} {'':<12}")
+
+        print("-" * 74)  # Devider
 
 
 def send_keepalive(session_id: str) -> bool | None:
-    # Tell the server that the session is still alive
+    """Tell the server that the session is still alive"""
 
     payload = {"session_id": session_id}
 
@@ -209,7 +227,7 @@ def send_keepalive(session_id: str) -> bool | None:
 
 
 def keepalive_loop(session_id: str):
-    # Keep the session alive while it owns locks
+    """Keep the session alive while it owns locks"""
 
     while True:
         time.sleep(10)
@@ -221,9 +239,7 @@ def keepalive_loop(session_id: str):
             break
 
         if not result:
-            print(
-                f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})"
-            )
+            print(f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})")
             break
 
 
