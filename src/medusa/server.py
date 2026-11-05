@@ -227,7 +227,8 @@ POOL = DepLockManager()
 
 
 async def cleanup_loop():
-    # Clean up expired locks every 5 seconds
+    """Clean up expired locks every 5 seconds"""
+
     while True:
         async with POOL.server_mutex:
             POOL.check_and_reclaim_expired_locks(timeout_seconds=30)
@@ -236,12 +237,14 @@ async def cleanup_loop():
 
 
 async def on_startup(app):
-    # Create cleanup-task when the application was started
+    """Create cleanup-task when the application was started"""
+
     app["cleanup_task"] = asyncio.create_task(cleanup_loop())
 
 
 async def on_cleanup(app):
-    # Stop cleanup-task when application ends
+    """Stop cleanup-task when application ends"""
+
     app["cleanup_task"].cancel()
 
     try:
@@ -251,6 +254,7 @@ async def on_cleanup(app):
 
 
 async def parse_lock_request(request_data):
+    """Parse and validate a lock request containing static and dynamic dependencies"""
     try:
         body = await request_data.json()
     except Exception:
@@ -304,7 +308,7 @@ async def parse_lock_request(request_data):
 
 
 async def parse_free_request(request):
-    # Parse and validate a session_id and optional devices from a free request
+    """Parse and validate a session_id and optional devices from a free request"""
 
     try:
         body = await request.json()
@@ -431,7 +435,7 @@ async def handle_alive(request):
 
 
 async def handle_lock(request):
-    # Function for locking dependencies according to "all or nothing"-principle
+    """Function for locking dependencies according to "all or nothing"-principle"""
 
     # 1. Payload parsing & validation
     parsed = await parse_lock_request(request)
@@ -498,7 +502,7 @@ async def handle_lock(request):
 
 
 async def handle_free(request):
-    # Release all or selected devices belonging to a session
+    """Release all or selected devices belonging to a session"""
 
     # 1. Payload parsing & validation
     parsed = await parse_free_request(request)
@@ -524,6 +528,8 @@ async def handle_free(request):
 
 
 def create_app():
+    """Create and configure the web application."""
+
     app = web.Application()
 
     app.add_routes(
@@ -542,6 +548,8 @@ def create_app():
 
 
 def start_server():
+    """Start the Medusa lock-server."""
+
     print("Medusa lock-server auf http://127.0.0.1:8080 ...")
     web.run_app(create_app(), host="127.0.0.1", port=8080)
 
