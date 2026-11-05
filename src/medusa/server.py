@@ -30,35 +30,49 @@ class Session:
 class DepLockManager:
     def __init__(self):
         self.server_mutex = asyncio.Lock()  # mutex-protection
-        self.sessions: set[Session] = set()  # set of all active sessions
+        self.sessions: dict[
+            str, Session
+        ] = {}  # dict of all active sessions (session_id -> Session)
+        self.active_locks: dict[
+            str, str
+        ] = {}  # dict of all active locks (Device -> session_id)
 
     def check_and_reclaim_expired_locks(self, timeout_seconds=30):
-        # Clean up expired locks
+        # Clean up expired sessions
 
         current_time = time.time()
 
         # Get expired sessions
         expired_sessions = [
             session
-            for session in self.sessions
+            for session in self.sessions.values()
             if current_time - session.last_alive > timeout_seconds
         ]
 
-        # Remove expired sessions
+        # Cleanup expired sessions
         for session in expired_sessions:
-            self.sessions.remove(session)
+            released_devices = sorted(session.devices)
+
+            # Remove all devices belonging to this session
+            for device in session.devices:
+                self.active_locks.pop(device, None)
+
+            # Remove the session itself
+            self.sessions.pop(session.uuid, None)
 
             print(
-                f"[CLEANUP] Released locks of session '{session.uuid}': {sorted(session.devices)}."
+                f"[CLEANUP] Released locks of session '{session.uuid}': {sorted(released_devices)}."
             )
 
-    def release_session(self, session_id: str) -> dict:
-        # Find all devices which are owned by a specific session & release them
+    def release_session(
+        self,
+        session_id: str,
+        devices: set[str] | None = None,
+    ) -> dict:
+        # Find a session and release all or selected devices
 
-        session = next(
-            (s for s in self.sessions if s.uuid == session_id),
-            None,
-        )
+        # Find session
+        session = self.sessions.get(session_id)
 
         if session is None:
             return {
@@ -66,18 +80,39 @@ class DepLockManager:
                 "message": "Unknown session.",
             }
 
-        self.sessions.remove(session)
+        # Determine which devices should be released
+        devices_to_release = (
+            set(session.devices) if devices is None else devices
+        )
 
-        devices = sorted(session.devices)
+        # Ensure all requested devices belong to this session
+        if not devices_to_release.issubset(session.devices):
+            return {
+                "status": "rejected",
+                "message": "One or more devices do not belong to this session.",
+            }
+
+        released_devices = sorted(devices_to_release)
+
+        # Remove devices from session and active locks
+        for device in devices_to_release:
+            session.devices.remove(device)
+            self.active_locks.pop(device, None)
+
+        # Full release if no specific devices were provided
+        close_session = devices is None
+
+        if close_session:
+            del self.sessions[session_id]
 
         print(
-            f"[FREE] Released session '{session_id}'. Freed devices: {devices}."
+            f"[FREE] Released devices {released_devices} from session '{session_id}'."
         )
 
         return {
-            "status": "freed",
+            "status": "closed" if close_session else "freed",
             "session_id": session_id,
-            "devices": devices,
+            "devices": released_devices,
         }
 
     def resolve_dynamic_dependencies(
@@ -111,60 +146,80 @@ class DepLockManager:
         return {dep_name: device for device, dep_name in option_owner.items()}
 
     def resolve_and_assign_dependencies(
-        self, static_deps: set[str], dynamic_raw: dict[str, set[str]]
+        self,
+        session_id: str | None,
+        static_deps: set[str],
+        dynamic_raw: dict[str, set[str]],
     ) -> dict:
         # Resolve dependencies and create a session if all devices are available
 
         print(
-            f"[SERVER] Lock request received: static={sorted(static_deps)}, dynamic={dynamic_raw}"
+            f"[SERVER] Lock request received: session={session_id} static={sorted(static_deps)}, dynamic={dynamic_raw}"
         )
 
-        # 1. Collect all devices currently locked by any session
-        busy_deps = {
-            device for session in self.sessions for device in session.devices
-        }
+        # 1. Find existing session, if a UUID was provided
+        session = None
 
-        # 2. Check whether the requested static dependencies are available
+        if session_id is not None:
+            session = self.sessions.get(session_id)
+
+            if session is None:
+                return {"status": "error", "message": "Unknown session."}
+
+        # 2. Determine devices already held by this session
+        own_deps = session.devices if session else set()
+
+        # 3. Determine devices held by other sessions
+        busy_deps = set(self.active_locks) - own_deps
+
+        # 4. Check if requested static dependencies are available
         busy_static = static_deps & busy_deps
 
         if busy_static:
-            unavailable_message = (
-                f"Static dependencies are busy: {sorted(busy_static)}"
-            )
             return {
                 "status": "unavailable",
-                "message": unavailable_message,
+                "message": f"Static dependencies are busy: {sorted(busy_static)}",
             }
 
-        # 3. Remove busy devices and static dependencies from dynamic options
+        # 5. Remove busy devices and static dependencies
         available_options = {
             name: options - busy_deps - static_deps
             for name, options in dynamic_raw.items()
         }
 
-        # 4. Assign concrete devices to the dynamic dependencies
+        # 6. Resolve dynamic dependencies
         assigned_dynamic = self.resolve_dynamic_dependencies(available_options)
 
         if assigned_dynamic is None:
-            unavailable_message = "No distinct set of devices satisfies all dynamic dependencies."
             return {
                 "status": "unavailable",
-                "message": unavailable_message,
+                "message": "No distinct set of devices satisfies all dynamic dependencies.",
             }
 
-        # 5. Combine static and assigned dynamic dependencies
-        concrete_deps = static_deps | set(assigned_dynamic.values())
+        # 7. Combine static and assigned dynamic dependencies
+        requested_deps = static_deps | set(assigned_dynamic.values())
 
-        # 6. Create and register a new session for this lock request
-        session = Session.create_session(concrete_deps)
-        self.sessions.add(session)
+        # 8. Determine which devices are actually new
+        new_deps = requested_deps - own_deps
 
-        # 7. Return the result to the handler
+        # 9. Create a new session if no UUID was provided
+        if session is None:
+            session = Session.create_session(new_deps)
+            self.sessions[session.uuid] = session
+        else:
+            # Extend existing session
+            session.devices.update(new_deps)
+
+        # 10. Register newly acquired devices
+        for device in new_deps:
+            self.active_locks[device] = session.uuid
+
+        # 11. Return the result
         return {
             "status": "locked",
             "session": session,
             "assigned_dynamic": assigned_dynamic,
-            "concrete_deps": concrete_deps,
+            "concrete_deps": session.devices.copy(),
         }
 
 
@@ -198,11 +253,27 @@ async def on_cleanup(app):
 async def parse_lock_request(request_data):
     try:
         body = await request_data.json()
-        static_raw = body.get("deps_static", [])
-        dynamic_raw = body.get("deps_dynamic", {})
     except Exception:
         return web.json_response(
             {"status": "error", "message": "Malformed JSON payload"},
+            status=400,
+        )
+
+    if not isinstance(body, dict):
+        return web.json_response(
+            {"status": "error", "message": "Invalid request body"},
+            status=400,
+        )
+
+    session_id = body.get("session_id")
+    static_raw = body.get("deps_static", [])
+    dynamic_raw = body.get("deps_dynamic", {})
+
+    if session_id is not None and (
+        not isinstance(session_id, str) or not session_id
+    ):
+        return web.json_response(
+            {"status": "error", "message": "Invalid session_id"},
             status=400,
         )
 
@@ -229,16 +300,23 @@ async def parse_lock_request(request_data):
             status=400,
         )
 
-    return static_raw, dynamic_raw
+    return session_id, static_raw, dynamic_raw
 
 
 async def parse_free_request(request):
-    # Parse and validate a session ID from a free request
+    # Parse and validate a session_id and optional devices from a free request
+
     try:
         body = await request.json()
     except Exception:
         return web.json_response(
             {"status": "error", "message": "Malformed JSON payload"},
+            status=400,
+        )
+
+    if not isinstance(body, dict):
+        return web.json_response(
+            {"status": "error", "message": "Invalid request body"},
             status=400,
         )
 
@@ -250,11 +328,30 @@ async def parse_free_request(request):
             status=400,
         )
 
-    return session_id
+    devices = body.get("devices")
+
+    if devices is not None:
+        if not isinstance(devices, list) or not all(
+            isinstance(device, str) and device for device in devices
+        ):
+            return web.json_response(
+                {"status": "error", "message": "Invalid devices"},
+                status=400,
+            )
+
+        if len(devices) != len(set(devices)):
+            return web.json_response(
+                {"status": "error", "message": "Duplicate devices"},
+                status=400,
+            )
+
+        devices = set(devices)
+
+    return session_id, devices
 
 
 async def handle_status(request):
-    # Shows all active sessions and their locked devices
+    """Shows all active sessions and their locked devices"""
 
     print("[SERVER] Global status dashboard request received.")
 
@@ -268,23 +365,30 @@ async def handle_status(request):
                 "since": session.since,
                 "last_alive": session.last_alive,
             }
-            for session in POOL.sessions
+            for session in POOL.sessions.values()
         ]
 
     return web.json_response({"sessions": sessions})
 
 
 async def handle_alive(request):
-    # Update the last_alive timestamp of an existing session
+    """Update the last_alive timestamp of an existing session"""
 
     try:
         body = await request.json()
-        session_id = body.get("session_id")
     except Exception:
         return web.json_response(
             {"status": "error", "message": "Malformed JSON payload"},
             status=400,
         )
+
+    if not isinstance(body, dict):
+        return web.json_response(
+            {"status": "error", "message": "Invalid request body"},
+            status=400,
+        )
+
+    session_id = body.get("session_id")
 
     if not isinstance(session_id, str) or not session_id:
         return web.json_response(
@@ -295,10 +399,7 @@ async def handle_alive(request):
     async with POOL.server_mutex:
         POOL.check_and_reclaim_expired_locks()
 
-        session = next(
-            (s for s in POOL.sessions if s.uuid == session_id),
-            None,
-        )
+        session = POOL.sessions.get(session_id)
 
         if session is None:
             print(f"[ALIVE] Unknown session: {session_id}")
@@ -311,10 +412,11 @@ async def handle_alive(request):
             )
 
         session.last_alive = time.time()
+        last_alive = session.last_alive
 
-    readable_time = datetime.fromtimestamp(
-        session.last_alive, tz=UTC
-    ).strftime("%Y-%m-%d %H:%M:%S")
+    readable_time = datetime.fromtimestamp(last_alive, tz=UTC).strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
 
     print(
         f"[ALIVE] Session '{session_id}' updated last_alive to {readable_time}"
@@ -332,10 +434,12 @@ async def handle_lock(request):
     # Function for locking dependencies according to "all or nothing"-principle
 
     # 1. Payload parsing & validation
-    static_raw, dynamic_raw = await parse_lock_request(request)
+    parsed = await parse_lock_request(request)
 
-    if isinstance(static_raw, web.Response):
-        return static_raw
+    if isinstance(parsed, web.Response):
+        return parsed
+
+    session_id, static_raw, dynamic_raw = parsed
 
     # 2. Prepare dependencies
     static_deps = set(static_raw)
@@ -361,13 +465,18 @@ async def handle_lock(request):
 
         # 4. Check availability & assign dependencies
         lock_data = POOL.resolve_and_assign_dependencies(
-            static_deps, dynamic_options
+            session_id,
+            static_deps,
+            dynamic_options,
         )
 
     # 5. Unavailable: Return immediately without acquiring any locks
     if lock_data["status"] == "unavailable":
         print("[SERVER] Some Dependencies from lock-request are unavailable.")
         return web.json_response(lock_data, status=409)
+
+    if lock_data["status"] == "error":
+        return web.json_response(lock_data, status=404)
 
     # 6. Lock successfully acquired
     session = lock_data["session"]
@@ -389,28 +498,34 @@ async def handle_lock(request):
 
 
 async def handle_free(request):
-    # Release all devices belonging to a session
+    # Release all or selected devices belonging to a session
 
     # 1. Payload parsing & validation
-    session_id = await parse_free_request(request)
+    parsed = await parse_free_request(request)
 
-    if isinstance(session_id, web.Response):
-        return session_id
+    if isinstance(parsed, web.Response):
+        return parsed
 
-    # 2. Clean up expired sessions
+    session_id, devices = parsed
+
+    # 2. Clean up expired sessions and release requested devices
     async with POOL.server_mutex:
         POOL.check_and_reclaim_expired_locks()
-        result = POOL.release_session(session_id)
+        result = POOL.release_session(session_id, devices)
 
     # 3. Return result
     if result["status"] == "error":
         return web.json_response(result, status=404)
 
+    if result["status"] == "rejected":
+        return web.json_response(result, status=409)
+
     return web.json_response(result, status=200)
 
 
-if __name__ == "__main__":
+def create_app():
     app = web.Application()
+
     app.add_routes(
         [
             web.get("/status", handle_status),
@@ -419,9 +534,17 @@ if __name__ == "__main__":
             web.post("/alive", handle_alive),
         ]
     )
-    print("Medusa lock-server auf http://127.0.0.1:8080 ...")
 
     app.on_startup.append(on_startup)
     app.on_cleanup.append(on_cleanup)
 
-    web.run_app(app, host="127.0.0.1", port=8080)
+    return app
+
+
+def start_server():
+    print("Medusa lock-server auf http://127.0.0.1:8080 ...")
+    web.run_app(create_app(), host="127.0.0.1", port=8080)
+
+
+if __name__ == "__main__":
+    start_server()
