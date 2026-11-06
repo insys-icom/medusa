@@ -91,7 +91,11 @@ class ServerDepManager:
         payload: dict[str, Any] = {
             "deps_static": sorted(suite.deps_static),
             "deps_dynamic": {
-                name: sorted(dyn.options)
+                name: (
+                    [dyn.value]
+                    if isinstance(dyn._value, str)
+                    else sorted(dyn.options)
+                )
                 for name, dyn in suite.deps_dynamic.items()
             },
         }
@@ -232,7 +236,16 @@ class ServerDepManager:
 
         # Apply the servers dynamic assignments to the suite
         for name, device in assigned_dynamic.items():
-            suite.deps_dynamic[name].value = device
+            dyn = suite.deps_dynamic[name]
+
+            if isinstance(dyn._value, str):
+                if dyn.value != device:
+                    raise ValueError(
+                        f"Server assigned device '{device}' to dynamic dependency '{name}', "
+                        f"but it was expected to be '{dyn.value}'"
+                    )
+            else:
+                dyn.value = device
 
         # Store session_id and assigned devices for later keepalive & release requests
         with self._state_lock:
@@ -355,7 +368,7 @@ class ServerDepManager:
         """Release all devices and terminate the session"""
 
         with self._state_lock:
-            session_data = self.active_sessions.pop(suite, None)
+            session_data = self.active_sessions.get(suite, None)
 
         if session_data is None:
             return
