@@ -1,6 +1,6 @@
 import argparse
 import time
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 import requests
@@ -179,13 +179,9 @@ def print_status(data: dict):
     for session in sessions:
         session_id = session["session_id"]
 
-        since = datetime.fromtimestamp(session["since"], tz=UTC).strftime(
-            "%H:%M:%S"
-        )
+        since = datetime.fromtimestamp(session["since"]).strftime("%H:%M:%S")
 
-        last_alive = datetime.fromtimestamp(
-            session["last_alive"], tz=UTC
-        ).strftime("%H:%M:%S")
+        last_alive = datetime.fromtimestamp(session["last_alive"]).strftime("%H:%M:%S")
 
         devices = session["devices"]
 
