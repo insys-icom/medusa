@@ -31,6 +31,7 @@ def parse_arguments():
     return parser.parse_args()
 
 
+# TODO(SZI): make internal
 def parse_dependencies(
     dependencies: list[str],
 ) -> tuple[list[str], dict[str, list[str]]]:
@@ -50,6 +51,7 @@ def parse_dependencies(
     return static_deps, dynamic_deps
 
 
+# TODO(SZI): make internal
 def send_lock(
     static_deps: list[str], dynamic_deps: dict[str, list[str]]
 ) -> str | None:
@@ -239,6 +241,7 @@ def keepalive_loop(session_id: str):
             break
 
 
+# TODO(SZI): Clean up functions that are no longer needed
 def main():
     args = parse_arguments()
 

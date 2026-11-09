@@ -27,6 +27,9 @@ class Session:
         )
 
 
+# TODO(SZI): Make internal functions actually internal
+# TODO(SZI): Go through functions and move details to separate functions where
+#            necessary/sensible
 class DepLockManager:
     def __init__(self):
         self.server_mutex = asyncio.Lock()  # mutex-protection
@@ -223,6 +226,8 @@ class DepLockManager:
         }
 
 
+# TODO(SZI): Consider grouping all of this into a class to avoid global
+#            variables and make things more readable
 POOL = DepLockManager()
 
 
@@ -554,5 +559,6 @@ def start_server():
     web.run_app(create_app(), host="127.0.0.1", port=8080)
 
 
+# TODO(SZI): Clean up
 if __name__ == "__main__":
     start_server()

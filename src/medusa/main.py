@@ -20,6 +20,13 @@ from .cli import (
     show_status,
 )
 
+# TODO(SZI): add ADDRESS/PORT to server command
+# TODO(SZI): add server ADDRESS/PORT to run, lock, free, status commands
+# TODO(SZI): also allow using environment variable eg. MEDUSA_SERVER for server
+#            with run, lock, free, status commands
+# TODO(SZI): remove medusa help status command
+# TODO(SZI): consolidate medusa help lock|free, turn it into general help text
+#            about server|lock|free|status usage and how that works
 HELP = f"""Medusa: Run Robot Framework suites with depdendency-aware parallelization
 
 Usage:

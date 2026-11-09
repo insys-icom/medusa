@@ -141,6 +141,12 @@ class Suite(Stats, Timer):
             {dyn.value for dyn in self.deps_dynamic.values()}
         )
 
+    # TODO(SZI): Consolidate with the ServerDepManager version, we want one
+    #            implementation for both server and local DepManager. So we
+    #            need to move this out of the Suite class into a separate class
+    #            or interface (abstract class).
+    #            You will need to change the signature for this, since on the
+    #            server you won't know the "available_deps" for example.
     def try_assign_deps(
         self, available_deps: set[str] | None = None
     ) -> set[str] | None:

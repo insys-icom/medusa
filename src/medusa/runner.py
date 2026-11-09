@@ -57,6 +57,9 @@ class _SignalMonitor:
 SIGNAL_MONITOR = _SignalMonitor()
 
 
+# TODO(SZI): Move to separate file
+# TODO(SZI): Re-introduce regular DepManager as LocalDepManager
+# TODO(SZI): Break functions into smaller steps/different layers of complexity
 class ServerDepManager:
     """Manages server-side dependency locking for test suites."""
 
@@ -364,6 +367,7 @@ class ServerDepManager:
                 f"[SERVER-DEPMGR] Keepalive sent for session '{session_id}'."
             )
 
+    # TODO(SZI): Make internal
     def finish_session(self, suite: "Suite") -> None:
         """Release all devices and terminate the session"""
 
@@ -403,6 +407,7 @@ class ServerDepManager:
             f"[SERVER-DEPMGR] Finished session {session_id} with devices {sorted(devices)}"
         )
 
+    # TODO(SZI): Make internal
     def get_session_devices(self, suite: "Suite") -> set[str]:
         """Return the devices currently assigned to a suite's session."""
 
@@ -552,6 +557,28 @@ class Runner:
     def __init__(self, settings: "Settings", stage: "Stage"):
         self.stage = stage
 
+        # TODO(SZI): Runner should just call a function to get the right depmanager,
+        #            depending on whether the CLI options/environment variables for
+        #            server were set. Example:
+        # HERE
+        # self.depmgr: DepManager = get_dep_manager(stage, settings)
+        #
+        # SEPARATE FILE
+        # def get_dep_manager(stage, settings) -> DepManager:
+        #     IMPLEMENTATION
+        #
+        # class DepManager(ABC):
+        #     @abstractmethod
+        #     def try_lock(...):
+        #         pass
+        #
+        # class ServerDepManager(DepManager):
+        #     def try_lock(...):
+        #         IMPLEMENTATION
+        #
+        # class LocalDepManager(DepManager):
+        #     def try_lock(...):
+        #         IMPLEMENTATION
         self.depmgr = ServerDepManager(stage)
         self.procmgr = ProcessManager(settings)
 
