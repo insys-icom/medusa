@@ -6,8 +6,8 @@ import requests
 
 SERVER_URL = "http://127.0.0.1:8080"
 
-# TODO(SZI): make internal
-def parse_dependencies(
+
+def _parse_dependencies(
     dependencies: list[str],
 ) -> tuple[list[str], dict[str, list[str]]]:
     # Parse dependency-arguments into static & dynamic dependencies
@@ -26,8 +26,7 @@ def parse_dependencies(
     return static_deps, dynamic_deps
 
 
-# TODO(SZI): make internal
-def send_lock(
+def _send_lock(
     static_deps: list[str], dynamic_deps: dict[str, list[str]]
 ) -> str | None:
     """Send lock-request to server and returns the session_id"""
@@ -68,8 +67,8 @@ def send_lock(
 def lock_dependencies(dependencies: list[str]) -> None:
     """Lock the specified dependencies and maintain the session alive until interrupted."""
 
-    static_deps, dynamic_deps = parse_dependencies(dependencies)
-    session_id = send_lock(static_deps, dynamic_deps)
+    static_deps, dynamic_deps = _parse_dependencies(dependencies)
+    session_id = _send_lock(static_deps, dynamic_deps)
 
     if not session_id:
         return
@@ -77,11 +76,11 @@ def lock_dependencies(dependencies: list[str]) -> None:
     print(f"Session ID: {session_id}")
 
     try:
-        keepalive_loop(session_id)
+        _keepalive_loop(session_id)
     except KeyboardInterrupt:
         print("\nLock session interrupted.")
 
-        if send_free(session_id):
+        if _send_free(session_id):
             print(f"Session '{session_id}' released.")
         else:
             print(
@@ -89,7 +88,7 @@ def lock_dependencies(dependencies: list[str]) -> None:
             )
 
 
-def send_free(session_id: str) -> bool:
+def _send_free(session_id: str) -> bool:
     """Sends release-request for locked dependencies"""
 
     payload = {"session_id": session_id}
@@ -112,7 +111,7 @@ def send_free(session_id: str) -> bool:
 def free_dependencies(session_id: str) -> None:
     """Free the specified devices of a session by sending a release request to the server."""
 
-    if send_free(session_id):
+    if _send_free(session_id):
         print(f"Session '{session_id}' released.")
 
 
@@ -135,10 +134,10 @@ def show_status():
         print("Status request returned invalid JSON.")
         return
 
-    print_status(data)
+    _print_status(data)
 
 
-def print_status(data: dict):
+def _print_status(data: dict):
     """Print active sessions and their locked devices"""
 
     sessions = data.get("sessions", [])
@@ -173,7 +172,7 @@ def print_status(data: dict):
         print("-" * 74)  # Devider
 
 
-def send_keepalive(session_id: str) -> bool | None:
+def _send_keepalive(session_id: str) -> bool | None:
     """Tell the server that the session is still alive"""
 
     payload = {"session_id": session_id}
@@ -199,13 +198,13 @@ def send_keepalive(session_id: str) -> bool | None:
     return True
 
 
-def keepalive_loop(session_id: str):
+def _keepalive_loop(session_id: str):
     """Keep the session alive while it owns locks"""
 
     while True:
         time.sleep(10)
 
-        result = send_keepalive(session_id)
+        result = _send_keepalive(session_id)
 
         if result is None:
             # Session was deleted on the server
