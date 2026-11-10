@@ -1,4 +1,3 @@
-import argparse
 import time
 from datetime import datetime
 from typing import Any
@@ -6,30 +5,6 @@ from typing import Any
 import requests
 
 SERVER_URL = "http://127.0.0.1:8080"
-
-
-def parse_arguments():
-    """Parses arguments"""
-
-    parser = argparse.ArgumentParser(description="Medusa lock-server CLI")
-
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    lock_parser = subparsers.add_parser("lock")
-    lock_parser.add_argument(
-        "dependencies", nargs="+", help="Dependencies to lock"
-    )
-
-    free_parser = subparsers.add_parser("free")
-    free_parser.add_argument(
-        "session_id",
-        help="UUID of the session to release",
-    )
-
-    subparsers.add_parser("status")
-
-    return parser.parse_args()
-
 
 # TODO(SZI): make internal
 def parse_dependencies(
@@ -181,9 +156,9 @@ def print_status(data: dict):
     for session in sessions:
         session_id = session["session_id"]
 
-        since = datetime.fromtimestamp(session["since"]).strftime("%H:%M:%S")
-
-        last_alive = datetime.fromtimestamp(session["last_alive"]).strftime("%H:%M:%S")
+        # Display timestamps in the local system timezone
+        since = datetime.fromtimestamp(session["since"]).strftime("%H:%M:%S")   # noqa: DTZ006
+        last_alive = datetime.fromtimestamp(session["last_alive"]).strftime("%H:%M:%S") # noqa: DTZ006
 
         devices = session["devices"]
 
@@ -239,36 +214,3 @@ def keepalive_loop(session_id: str):
         if not result:
             print(f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})")
             break
-
-
-# TODO(SZI): Clean up functions that are no longer needed
-def main():
-    args = parse_arguments()
-
-    if args.command == "status":
-        show_status()
-        return
-
-    if args.command == "lock":
-        static_deps, dynamic_deps = parse_dependencies(args.dependencies)
-
-        # The server creates the session and returns its UUID
-        session_id = send_lock(static_deps, dynamic_deps)
-
-        if session_id:
-            print(f"Session ID: {session_id}")
-
-            try:
-                keepalive_loop(session_id)
-            except KeyboardInterrupt:
-                print(f"\nStopping session '{session_id}'.")
-
-    elif args.command == "free":
-        session_id = args.session_id
-
-        if send_free(session_id):
-            print(f"Session '{session_id}' released.")
-
-
-if __name__ == "__main__":
-    main()
