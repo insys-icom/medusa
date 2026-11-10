@@ -64,30 +64,6 @@ def _send_lock(
     return session_id
 
 
-def lock_dependencies(dependencies: list[str]) -> None:
-    """Lock the specified dependencies and maintain the session alive until interrupted."""
-
-    static_deps, dynamic_deps = _parse_dependencies(dependencies)
-    session_id = _send_lock(static_deps, dynamic_deps)
-
-    if not session_id:
-        return
-
-    print(f"Session ID: {session_id}")
-
-    try:
-        _keepalive_loop(session_id)
-    except KeyboardInterrupt:
-        print("\nLock session interrupted.")
-
-        if _send_free(session_id):
-            print(f"Session '{session_id}' released.")
-        else:
-            print(
-                f"Could not release session '{session_id}'. The server will reclaim it after timeout."
-            )
-
-
 def _send_free(session_id: str) -> bool:
     """Sends release-request for locked dependencies"""
 
@@ -106,35 +82,6 @@ def _send_free(session_id: str) -> bool:
     result = response.json()
     print(f"Freed dependencies: {result.get('devices', [])}")
     return True
-
-
-def free_dependencies(session_id: str) -> None:
-    """Free the specified devices of a session by sending a release request to the server."""
-
-    if _send_free(session_id):
-        print(f"Session '{session_id}' released.")
-
-
-def show_status():
-    """Send status-request and print current server status"""
-
-    try:
-        response = requests.get(f"{SERVER_URL}/status", timeout=5)
-    except requests.RequestException as exc:
-        print(f"Status request failed: {exc}")
-        return
-
-    if response.status_code != 200:
-        print(f"Status rejected: {response.status_code} {response.text}")
-        return
-
-    try:
-        data = response.json()
-    except ValueError:
-        print("Status request returned invalid JSON.")
-        return
-
-    _print_status(data)
 
 
 def _print_status(data: dict):
@@ -197,7 +144,6 @@ def _send_keepalive(session_id: str) -> bool | None:
 
     return True
 
-
 def _keepalive_loop(session_id: str):
     """Keep the session alive while it owns locks"""
 
@@ -213,3 +159,54 @@ def _keepalive_loop(session_id: str):
         if not result:
             print(f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})")
             break
+
+
+def lock_dependencies(dependencies: list[str]) -> None:
+    """Lock the specified dependencies and maintain the session alive until interrupted."""
+
+    static_deps, dynamic_deps = _parse_dependencies(dependencies)
+    session_id = _send_lock(static_deps, dynamic_deps)
+
+    if not session_id:
+        return
+
+    print(f"Session ID: {session_id}")
+
+    try:
+        _keepalive_loop(session_id)
+    except KeyboardInterrupt:
+        print("\nLock session interrupted.")
+
+        if _send_free(session_id):
+            print(f"Session '{session_id}' released.")
+        else:
+            print(
+                f"Could not release session '{session_id}'. The server will reclaim it after timeout."
+            )
+
+def free_dependencies(session_id: str) -> None:
+    """Free the specified devices of a session by sending a release request to the server."""
+
+    if _send_free(session_id):
+        print(f"Session '{session_id}' released.")
+
+def show_status():
+    """Send status-request and print current server status"""
+
+    try:
+        response = requests.get(f"{SERVER_URL}/status", timeout=5)
+    except requests.RequestException as exc:
+        print(f"Status request failed: {exc}")
+        return
+
+    if response.status_code != 200:
+        print(f"Status rejected: {response.status_code} {response.text}")
+        return
+
+    try:
+        data = response.json()
+    except ValueError:
+        print("Status request returned invalid JSON.")
+        return
+
+    _print_status(data)
