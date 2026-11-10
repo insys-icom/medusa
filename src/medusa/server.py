@@ -15,7 +15,7 @@ class Session:
     last_alive: float = field(default_factory=time.time)
 
     @classmethod
-    def create_session(cls, devices: set[str]) -> "Session":
+    def _create_session(cls, devices: set[str]) -> "Session":
         # Creates a new session
         now = time.time()
 
@@ -27,7 +27,6 @@ class Session:
         )
 
 
-# TODO(SZI): Make internal functions actually internal
 # TODO(SZI): Go through functions and move details to separate functions where
 #            necessary/sensible
 class DepLockManager:
@@ -40,7 +39,7 @@ class DepLockManager:
             str, str
         ] = {}  # dict of all active locks (Device -> session_id)
 
-    def check_and_reclaim_expired_locks(self, timeout_seconds=30):
+    def _check_and_reclaim_expired_locks(self, timeout_seconds=30):
         # Clean up expired sessions
 
         current_time = time.time()
@@ -67,7 +66,7 @@ class DepLockManager:
                 f"[CLEANUP] Released locks of session '{session.uuid}': {sorted(released_devices)}."
             )
 
-    def release_session(
+    def _release_session(
         self,
         session_id: str,
         devices: set[str] | None = None,
@@ -118,7 +117,7 @@ class DepLockManager:
             "devices": released_devices,
         }
 
-    def resolve_dynamic_dependencies(
+    def _resolve_dynamic_dependencies(
         self, available_options: dict[str, set[str]]
     ) -> dict[str, str] | None:
         # Assign a distinct available device to every dynamic dependency
@@ -148,7 +147,7 @@ class DepLockManager:
 
         return {dep_name: device for device, dep_name in option_owner.items()}
 
-    def resolve_and_assign_dependencies(
+    def _resolve_and_assign_dependencies(
         self,
         session_id: str | None,
         static_deps: set[str],
@@ -191,7 +190,7 @@ class DepLockManager:
         }
 
         # 6. Resolve dynamic dependencies
-        assigned_dynamic = self.resolve_dynamic_dependencies(available_options)
+        assigned_dynamic = self._resolve_dynamic_dependencies(available_options)
 
         if assigned_dynamic is None:
             return {
@@ -207,7 +206,7 @@ class DepLockManager:
 
         # 9. Create a new session if no UUID was provided
         if session is None:
-            session = Session.create_session(new_deps)
+            session = Session._create_session(new_deps)
             self.sessions[session.uuid] = session
         else:
             # Extend existing session
@@ -231,23 +230,23 @@ class DepLockManager:
 POOL = DepLockManager()
 
 
-async def cleanup_loop():
+async def _cleanup_loop():
     """Clean up expired locks every 5 seconds"""
 
     while True:
         async with POOL.server_mutex:
-            POOL.check_and_reclaim_expired_locks(timeout_seconds=30)
+            POOL._check_and_reclaim_expired_locks(timeout_seconds=30)
 
         await asyncio.sleep(5)
 
 
-async def on_startup(app):
+async def _on_startup(app):
     """Create cleanup-task when the application was started"""
 
-    app["cleanup_task"] = asyncio.create_task(cleanup_loop())
+    app["cleanup_task"] = asyncio.create_task(_cleanup_loop())
 
 
-async def on_cleanup(app):
+async def _on_cleanup(app):
     """Stop cleanup-task when application ends"""
 
     app["cleanup_task"].cancel()
@@ -258,7 +257,7 @@ async def on_cleanup(app):
         pass
 
 
-async def parse_lock_request(request_data):
+async def _parse_lock_request(request_data):
     """Parse and validate a lock request containing static and dynamic dependencies"""
     try:
         body = await request_data.json()
@@ -312,7 +311,7 @@ async def parse_lock_request(request_data):
     return session_id, static_raw, dynamic_raw
 
 
-async def parse_free_request(request):
+async def _parse_free_request(request):
     """Parse and validate a session_id and optional devices from a free request"""
 
     try:
@@ -359,13 +358,13 @@ async def parse_free_request(request):
     return session_id, devices
 
 
-async def handle_status(request):
+async def _handle_status(request):
     """Shows all active sessions and their locked devices"""
 
     print("[SERVER] Global status dashboard request received.")
 
     async with POOL.server_mutex:
-        POOL.check_and_reclaim_expired_locks()
+        POOL._check_and_reclaim_expired_locks()
 
         sessions = [
             {
@@ -380,7 +379,7 @@ async def handle_status(request):
     return web.json_response({"sessions": sessions})
 
 
-async def handle_alive(request):
+async def _handle_alive(request):
     """Update the last_alive timestamp of an existing session"""
 
     try:
@@ -406,7 +405,7 @@ async def handle_alive(request):
         )
 
     async with POOL.server_mutex:
-        POOL.check_and_reclaim_expired_locks()
+        POOL._check_and_reclaim_expired_locks()
 
         session = POOL.sessions.get(session_id)
 
@@ -439,11 +438,11 @@ async def handle_alive(request):
     )
 
 
-async def handle_lock(request):
+async def _handle_lock(request):
     """Function for locking dependencies according to "all or nothing"-principle"""
 
     # 1. Payload parsing & validation
-    parsed = await parse_lock_request(request)
+    parsed = await _parse_lock_request(request)
 
     if isinstance(parsed, web.Response):
         return parsed
@@ -470,10 +469,10 @@ async def handle_lock(request):
 
     async with POOL.server_mutex:
         # 3. Preventive Cleanup: Prevents orphaned locks from blocking the system
-        POOL.check_and_reclaim_expired_locks()
+        POOL._check_and_reclaim_expired_locks()
 
         # 4. Check availability & assign dependencies
-        lock_data = POOL.resolve_and_assign_dependencies(
+        lock_data = POOL._resolve_and_assign_dependencies(
             session_id,
             static_deps,
             dynamic_options,
@@ -506,11 +505,11 @@ async def handle_lock(request):
     )
 
 
-async def handle_free(request):
+async def _handle_free(request):
     """Release all or selected devices belonging to a session"""
 
     # 1. Payload parsing & validation
-    parsed = await parse_free_request(request)
+    parsed = await _parse_free_request(request)
 
     if isinstance(parsed, web.Response):
         return parsed
@@ -519,8 +518,8 @@ async def handle_free(request):
 
     # 2. Clean up expired sessions and release requested devices
     async with POOL.server_mutex:
-        POOL.check_and_reclaim_expired_locks()
-        result = POOL.release_session(session_id, devices)
+        POOL._check_and_reclaim_expired_locks()
+        result = POOL._release_session(session_id, devices)
 
     # 3. Return result
     if result["status"] == "error":
@@ -532,22 +531,22 @@ async def handle_free(request):
     return web.json_response(result, status=200)
 
 
-def create_app():
+def _create_app():
     """Create and configure the web application."""
 
     app = web.Application()
 
     app.add_routes(
         [
-            web.get("/status", handle_status),
-            web.post("/lock", handle_lock),
-            web.post("/free", handle_free),
-            web.post("/alive", handle_alive),
+            web.get("/status", _handle_status),
+            web.post("/lock", _handle_lock),
+            web.post("/free", _handle_free),
+            web.post("/alive", _handle_alive),
         ]
     )
 
-    app.on_startup.append(on_startup)
-    app.on_cleanup.append(on_cleanup)
+    app.on_startup.append(_on_startup)
+    app.on_cleanup.append(_on_cleanup)
 
     return app
 
@@ -556,9 +555,4 @@ def start_server():
     """Start the Medusa lock-server."""
 
     print("Medusa lock-server auf http://127.0.0.1:8080 ...")
-    web.run_app(create_app(), host="127.0.0.1", port=8080)
-
-
-# TODO(SZI): Clean up
-if __name__ == "__main__":
-    start_server()
+    web.run_app(_create_app(), host="127.0.0.1", port=8080)
