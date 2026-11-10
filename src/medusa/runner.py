@@ -367,8 +367,7 @@ class ServerDepManager:
                 f"[SERVER-DEPMGR] Keepalive sent for session '{session_id}'."
             )
 
-    # TODO(SZI): Make internal
-    def finish_session(self, suite: "Suite") -> None:
+    def _finish_session(self, suite: "Suite") -> None:
         """Release all devices and terminate the session"""
 
         with self._state_lock:
@@ -407,8 +406,7 @@ class ServerDepManager:
             f"[SERVER-DEPMGR] Finished session {session_id} with devices {sorted(devices)}"
         )
 
-    # TODO(SZI): Make internal
-    def get_session_devices(self, suite: "Suite") -> set[str]:
+    def _get_session_devices(self, suite: "Suite") -> set[str]:
         """Return the devices currently assigned to a suite's session."""
 
         with self._state_lock:
@@ -639,14 +637,14 @@ class Runner:
             # Process finished suites
             for suite in self.procmgr.get_finished_suites(retry=retry):
                 # Get the devices currently assigned to this suite
-                devices = self.depmgr.get_session_devices(suite)
+                devices = self.depmgr._get_session_devices(suite)
 
                 # Release all devices, but keep the session alive
                 self.depmgr.free(suite, devices)
 
                 # Finish the session if no retry is pending
                 if suite.result != Result.FAIL or suite.retry <= 0:
-                    self.depmgr.finish_session(suite)
+                    self.depmgr._finish_session(suite)
 
                 change_happened = True
 
