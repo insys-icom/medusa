@@ -46,6 +46,10 @@ class DynDep:
         self._value: str | None = None
 
     @property
+    def has_value(self) -> bool:
+        return self._value is not None
+
+    @property
     def value(self) -> str:
         assert isinstance(self._value, str), (
             "Attempted to get DynDep value before it was determined"
