@@ -84,6 +84,11 @@ def _send_free(session_id: str) -> bool:
     return True
 
 
+def _format_datetime(value: str) -> str:
+    """Format an ISO-8601 datetime as local time."""
+    return datetime.fromisoformat(value).astimezone().strftime("%H:%M:%S")
+
+
 def _print_status(data: dict):
     """Print active sessions and their locked devices"""
 
@@ -101,11 +106,8 @@ def _print_status(data: dict):
 
     for session in sessions:
         session_id = session["session_id"]
-
-        # Display timestamps in the local system timezone
-        since = datetime.fromtimestamp(session["since"]).strftime("%H:%M:%S")   # noqa: DTZ006
-        last_alive = datetime.fromtimestamp(session["last_alive"]).strftime("%H:%M:%S") # noqa: DTZ006
-
+        since = _format_datetime(session["since"])
+        last_alive = _format_datetime(session["last_alive"])
         devices = session["devices"]
 
         for index, device in enumerate(devices):
@@ -144,6 +146,7 @@ def _send_keepalive(session_id: str) -> bool | None:
 
     return True
 
+
 def _keepalive_loop(session_id: str):
     """Keep the session alive while it owns locks"""
 
@@ -157,7 +160,9 @@ def _keepalive_loop(session_id: str):
             break
 
         if not result:
-            print(f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})")
+            print(
+                f"Keepalive failed. Stopping keepalive loop. (Session: {session_id})"
+            )
             break
 
 
@@ -184,11 +189,13 @@ def lock_dependencies(dependencies: list[str]) -> None:
                 f"Could not release session '{session_id}'. The server will reclaim it after timeout."
             )
 
+
 def free_dependencies(session_id: str) -> None:
     """Free the specified devices of a session by sending a release request to the server."""
 
     if _send_free(session_id):
         print(f"Session '{session_id}' released.")
+
 
 def show_status():
     """Send status-request and print current server status"""
