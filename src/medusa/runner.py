@@ -134,13 +134,12 @@ class ServerDepManager:
     ) -> None:
         """Release all or selected dependencies of a suite"""
 
-        session_data = self._get_session_data(suite)
+        session_id, session_devices = self._get_session_data(suite)
 
-        if session_data is None:
+        if session_id is None:
             print(f"[SERVER-DEPMGR] No active sessions found for '{suite}'.")
             return
 
-        session_id, session_devices = session_data
         close_session = devices is None
 
         devices_to_free = self._get_devices_to_free(
@@ -189,12 +188,10 @@ class ServerDepManager:
     def _finish_session(self, suite: "Suite") -> None:
         """Release all devices and terminate the session"""
 
-        session_data = self._get_session_data(suite)
+        session_id, devices = self._get_session_data(suite)
 
-        if session_data is None:
+        if session_id is None:
             return
-
-        session_id, devices = session_data
 
         payload = self._build_free_payload(
             session_id, devices, close_session=True
