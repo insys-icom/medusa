@@ -10,7 +10,7 @@ SERVER_URL = "http://127.0.0.1:8080"
 def _parse_dependencies(
     dependencies: list[str],
 ) -> tuple[list[str], dict[str, list[str]]]:
-    # Parse dependency-arguments into static & dynamic dependencies
+    """Parse dependency-arguments into static & dynamic dependencies"""
 
     static_deps = []
     dynamic_deps = {}
