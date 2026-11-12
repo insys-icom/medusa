@@ -175,10 +175,9 @@ class DepLockManager:
         print(
             f"[SERVER] Lock request received: session={session_id} static={sorted(static_deps)}, dynamic={dynamic_raw}"
         )
-
-        # 1. Find existing session, if a UUID was provided
         session = None
 
+        # 1. Find existing session, if a UUID was provided
         if session_id is not None:
             session = self.sessions.get(session_id)
 
