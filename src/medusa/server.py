@@ -1,8 +1,7 @@
 import asyncio
-import time
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 
 from aiohttp import web
 
@@ -11,13 +10,14 @@ from aiohttp import web
 class Session:
     uuid: str
     devices: set[str] = field(default_factory=set)
-    since: float = field(default_factory=time.time)
-    last_alive: float = field(default_factory=time.time)
+    since: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_alive: datetime = field(default_factory=lambda: datetime.now(UTC))
 
     @classmethod
     def _create_session(cls, devices: set[str]) -> "Session":
-        # Creates a new session
-        now = time.time()
+        """Create a new session"""
+
+        now = datetime.now(UTC)
 
         return cls(
             uuid=str(uuid.uuid4()),
@@ -40,15 +40,16 @@ class DepLockManager:
         ] = {}  # dict of all active locks (Device -> session_id)
 
     def _check_and_reclaim_expired_locks(self, timeout_seconds=30):
-        # Clean up expired sessions
+        """Cleanup expired sessions and their locks"""
 
-        current_time = time.time()
+        current_time = datetime.now(UTC)
 
         # Get expired sessions
         expired_sessions = [
             session
             for session in self.sessions.values()
-            if current_time - session.last_alive > timeout_seconds
+            if current_time - session.last_alive
+            > timedelta(seconds=timeout_seconds)
         ]
 
         # Cleanup expired sessions
@@ -71,7 +72,7 @@ class DepLockManager:
         session_id: str,
         devices: set[str] | None = None,
     ) -> dict:
-        # Find a session and release all or selected devices
+        """Find a session and release all or selected devices"""
 
         # Find session
         session = self.sessions.get(session_id)
@@ -120,7 +121,7 @@ class DepLockManager:
     def _resolve_dynamic_dependencies(
         self, available_options: dict[str, set[str]]
     ) -> dict[str, str] | None:
-        # Assign a distinct available device to every dynamic dependency
+        """Assign a distinct available device to every dynamic dependency"""
 
         if any(not options for options in available_options.values()):
             return None
@@ -153,7 +154,7 @@ class DepLockManager:
         static_deps: set[str],
         dynamic_raw: dict[str, set[str]],
     ) -> dict:
-        # Resolve dependencies and create a session if all devices are available
+        """Resolve dependencies and create a session if all devices are available"""
 
         print(
             f"[SERVER] Lock request received: session={session_id} static={sorted(static_deps)}, dynamic={dynamic_raw}"
@@ -190,7 +191,9 @@ class DepLockManager:
         }
 
         # 6. Resolve dynamic dependencies
-        assigned_dynamic = self._resolve_dynamic_dependencies(available_options)
+        assigned_dynamic = self._resolve_dynamic_dependencies(
+            available_options
+        )
 
         if assigned_dynamic is None:
             return {
@@ -229,7 +232,6 @@ class LockServer:
     def __init__(self):
         self.pool = DepLockManager()
 
-
     async def _cleanup_loop(self):
         """Clean up expired locks every 5 seconds"""
 
@@ -254,9 +256,9 @@ class LockServer:
         except asyncio.CancelledError:
             pass
 
-
     async def _parse_lock_request(self, request_data):
         """Parse and validate a lock request containing static and dynamic dependencies"""
+
         try:
             body = await request_data.json()
         except Exception:
@@ -283,9 +285,14 @@ class LockServer:
                 status=400,
             )
 
-        if not isinstance(static_raw, list) or not isinstance(dynamic_raw, dict):
+        if not isinstance(static_raw, list) or not isinstance(
+            dynamic_raw, dict
+        ):
             return web.json_response(
-                {"status": "error", "message": "Missing / invalid request fields"},
+                {
+                    "status": "error",
+                    "message": "Missing / invalid request fields",
+                },
                 status=400,
             )
 
@@ -295,7 +302,9 @@ class LockServer:
             not isinstance(name, str)
             or not name
             or not isinstance(options, list)
-            or any(not isinstance(device, str) or not device for device in options)
+            or any(
+                not isinstance(device, str) or not device for device in options
+            )
             for name, options in dynamic_raw.items()
         ):
             return web.json_response(
@@ -329,7 +338,10 @@ class LockServer:
 
         if not isinstance(session_id, str) or not session_id:
             return web.json_response(
-                {"status": "error", "message": "Missing or invalid session_id"},
+                {
+                    "status": "error",
+                    "message": "Missing or invalid session_id",
+                },
                 status=400,
             )
 
@@ -354,6 +366,10 @@ class LockServer:
 
         return session_id, devices
 
+    @staticmethod
+    def _format_datetime(value: datetime) -> str:
+        """Format a datetime in the local timezone"""
+        return value.replace(microsecond=0).astimezone().isoformat()
 
     async def _handle_status(self, request):
         """Shows all active sessions and their locked devices"""
@@ -367,8 +383,8 @@ class LockServer:
                 {
                     "session_id": session.uuid,
                     "devices": sorted(session.devices),
-                    "since": session.since,
-                    "last_alive": session.last_alive,
+                    "since": self._format_datetime(session.since),
+                    "last_alive": self._format_datetime(session.last_alive),
                 }
                 for session in self.pool.sessions.values()
             ]
@@ -396,7 +412,10 @@ class LockServer:
 
         if not isinstance(session_id, str) or not session_id:
             return web.json_response(
-                {"status": "error", "message": "Missing or invalid session_id"},
+                {
+                    "status": "error",
+                    "message": "Missing or invalid session_id",
+                },
                 status=400,
             )
 
@@ -415,11 +434,10 @@ class LockServer:
                     status=404,
                 )
 
-            session.last_alive = time.time()
+            session.last_alive = datetime.now(UTC)
             last_alive = session.last_alive
 
-        # Display timestamps in the local system timezone
-        readable_time = datetime.fromtimestamp(last_alive).strftime("%Y-%m-%d %H:%M:%S") # noqa: DTZ006
+        readable_time = self._format_datetime(last_alive)
 
         print(
             f"[ALIVE] Session '{session_id}' updated last_alive to {readable_time}"
@@ -447,7 +465,10 @@ class LockServer:
         static_deps = set(static_raw)
         if len(static_deps) != len(static_raw):
             return web.json_response(
-                {"status": "error", "message": "Duplicate static dependencies"},
+                {
+                    "status": "error",
+                    "message": "Duplicate static dependencies",
+                },
                 status=400,
             )
 
@@ -474,7 +495,9 @@ class LockServer:
 
         # 5. Unavailable: Return immediately without acquiring any locks
         if lock_data["status"] == "unavailable":
-            print("[SERVER] Some Dependencies from lock-request are unavailable.")
+            print(
+                "[SERVER] Some Dependencies from lock-request are unavailable."
+            )
             return web.json_response(lock_data, status=409)
 
         if lock_data["status"] == "error":
@@ -522,7 +545,6 @@ class LockServer:
             return web.json_response(result, status=409)
 
         return web.json_response(result, status=200)
-
 
     def _create_app(self):
         """Create and configure the web application"""
