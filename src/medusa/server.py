@@ -27,8 +27,6 @@ class Session:
         )
 
 
-# TODO(SZI): Go through functions and move details to separate functions where
-#            necessary/sensible
 class DepLockManager:
     def __init__(self):
         """Initialize session and device lock management.
