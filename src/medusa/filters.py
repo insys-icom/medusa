@@ -3,6 +3,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from .constants import META_RE
+from .dependency_resolver import resolve_dynamic_dependencies
 from .errors import MedusaError
 
 if TYPE_CHECKING:
@@ -138,7 +139,11 @@ class Filters:
                         return False  # No options left for a dynamic dep
 
                 if s.deps_dynamic:
-                    if s.try_assign_deps() is None:
+                    available_options = {
+                        name: dyn.options
+                        for name, dyn in s.deps_dynamic.items()
+                    }
+                    if resolve_dynamic_dependencies(available_options) is None:
                         # DynDeps are not solvable
                         return False
         else:
