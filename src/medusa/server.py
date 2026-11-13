@@ -59,7 +59,7 @@ class DepLockManager:
         released_devices = sorted(session.devices)
 
         for device in session.devices:
-            self.active_locks.pop(session.uuid, None)
+            self.active_locks.pop(device, None)
 
         print(
             f"[CLEANUP] Released locks of session '{session.uuid}': {released_devices}."
