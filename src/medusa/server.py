@@ -5,6 +5,8 @@ from datetime import UTC, datetime, timedelta
 
 from aiohttp import web
 
+from .dependency_resolver import resolve_dynamic_dependencies
+
 
 @dataclass(eq=False)
 class Session:
@@ -132,36 +134,6 @@ class DepLockManager:
             "devices": released_devices,
         }
 
-    def _resolve_dynamic_dependencies(
-        self, available_options: dict[str, set[str]]
-    ) -> dict[str, str] | None:
-        """Assign a distinct available device to every dynamic dependency"""
-
-        if any(not options for options in available_options.values()):
-            return None
-
-        option_owner: dict[str, str] = {}
-
-        def try_assign(dep_name: str, seen: set[str]) -> bool:
-            for option in sorted(available_options[dep_name]):
-                if option in seen:
-                    continue
-
-                seen.add(option)
-                owner = option_owner.get(option)
-
-                if owner is None or try_assign(owner, seen):
-                    option_owner[option] = dep_name
-                    return True
-
-            return False
-
-        for name in available_options:
-            if not try_assign(name, set()):
-                return None
-
-        return {dep_name: device for device, dep_name in option_owner.items()}
-
     def _resolve_and_assign_dependencies(
         self,
         session_id: str | None,
@@ -204,9 +176,7 @@ class DepLockManager:
         }
 
         # 6. Resolve dynamic dependencies
-        assigned_dynamic = self._resolve_dynamic_dependencies(
-            available_options
-        )
+        assigned_dynamic = resolve_dynamic_dependencies(available_options)
 
         if assigned_dynamic is None:
             return {
