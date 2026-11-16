@@ -271,15 +271,12 @@ class Runner:
 
             # Process finished suites
             for suite in self.procmgr.get_finished_suites(retry=retry):
-                # Get the devices currently assigned to this suite
-                _, devices = self.depmgr._get_session_data(suite)
-
                 # Release all devices, but keep the session alive
-                self.depmgr.free(suite, devices)
+                self.depmgr.free(suite)
 
                 # Finish the session if no retry is pending
                 if suite.result != Result.FAIL or suite.retry <= 0:
-                    self.depmgr._finish_session(suite)
+                    self.depmgr.finish(suite)
 
                 change_happened = True
 
@@ -294,9 +291,7 @@ class Runner:
                         self.procmgr.start(suite, retry=retry)
                         change_happened = True
 
-            # Send keepalive while locks are active
-            if self.depmgr.active_sessions:
-                self.depmgr.send_keepalive()
+            self.depmgr.keepalive()
 
             if change_happened:
                 self.print_status()

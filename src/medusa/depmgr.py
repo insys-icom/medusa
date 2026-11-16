@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Any
 
 import requests
 
+from .dependency_resolver import resolve_dynamic_dependencies
+
 if TYPE_CHECKING:
     from .data import Stage
     from .suite import Suite
@@ -21,10 +23,17 @@ class DepManager(ABC):
         """Attempt to lock dependencies required for the given suite."""
 
     @abstractmethod
-    def free(self, suite: "Suite") -> None:
+    def free(self, suite: "Suite", devices: set[str] | None = None) -> None:
         """Release the dependencies assigned to a suite."""
 
+    def finish(self, suite: "Suite") -> None:
+        """Finish dependency management for a completed suite."""
 
+    def keepalive(self) -> None:
+        """Keep active dependency locks alive if required."""
+
+
+# Local Dependency Manager for automatically medusa runs
 class LocalDepManager(DepManager):
     def __init__(self, stage: "Stage") -> None:
         super().__init__(stage)
@@ -35,22 +44,46 @@ class LocalDepManager(DepManager):
         """Attempt to lock dependencies for the given suite. Returns True on
         success or False if not all necessary dependencies were available."""
 
-        deps_assigned = suite.try_assign_deps(self.available)
-        if deps_assigned is None:
+        if not suite.deps_static.issubset(self.available):
             return False
 
-        assert deps_assigned.issubset(self.all)
-        assert deps_assigned.issubset(self.available), (
-            f"assigned={deps_assigned}, available={self.available}, all={self.all}"
-        )
-        self.available.difference_update(deps_assigned)
-        self.in_use.update(deps_assigned)
-        return True
+        available_options = {
+            name: ({dyn.value} if dyn.has_value else dyn.options).intersection(
+                self.available - suite.deps_static
+            )
+            for name, dyn in suite.deps_dynamic.items()
+        }
 
-    def free(self, suite: "Suite") -> None:
-        """Release the dependencies assigned to a suite."""
+        assignments = resolve_dynamic_dependencies(available_options)
+
+        if assignments is None:
+            return False
+
+        for name, value in assignments.items():
+            dyn = suite.deps_dynamic[name]
+
+            if not dyn.has_value:
+                dyn.value = value
 
         deps_assigned = suite.deps
+
+        assert deps_assigned.issubset(self.all)
+        assert deps_assigned.issubset(self.available)
+
+        self.available.difference_update(deps_assigned)
+        self.in_use.update(deps_assigned)
+
+        return True
+
+    def free(
+        self,
+        suite: "Suite",
+        devices: set[str] | None = None,
+    ) -> None:
+        """Release all or selected dependencies assigned of a suite."""
+
+        deps_assigned = suite.deps if devices is None else devices
+
         assert deps_assigned.issubset(self.all)
         assert deps_assigned.issubset(self.in_use)
 
@@ -58,6 +91,7 @@ class LocalDepManager(DepManager):
         self.in_use.difference_update(deps_assigned)
 
 
+# Dependency Manager over a server to
 class ServerDepManager(DepManager):
     def __init__(self, stage: "Stage", server_url="http://127.0.0.1:8080"):
         """Initialize the server dependency manager with the given stage and server URL."""
@@ -133,7 +167,7 @@ class ServerDepManager(DepManager):
             print(f"[SERVER-DEPMGR] No active sessions found for '{suite}'.")
             return
 
-        close_session = devices is None
+        close_session = False
 
         devices_to_free = self._get_devices_to_free(
             session_id, session_devices, devices
@@ -165,7 +199,7 @@ class ServerDepManager(DepManager):
             f"[SERVER-DEPMGR] Released {sorted(devices_to_free)} for session '{session_id}'."
         )
 
-    def send_keepalive(self):
+    def keepalive(self) -> None:
         """Send keepalive-requests for all active sessions"""
 
         # Take a snapshot of the active session_ids
@@ -178,7 +212,7 @@ class ServerDepManager(DepManager):
         for session_id in sessions:
             self._send_keepalive_request(session_id)
 
-    def _finish_session(self, suite: "Suite") -> None:
+    def finish(self, suite: "Suite") -> None:
         """Release all devices and terminate the session"""
 
         session_id, devices = self._get_session_data(suite)
