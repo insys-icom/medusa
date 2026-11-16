@@ -212,8 +212,10 @@ class DepLockManager:
 
 
 class LockServer:
-    def __init__(self):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8080):
         self.pool = DepLockManager()
+        self.host = host
+        self.port = port
 
     async def _cleanup_loop(self):
         """Clean up expired locks every 5 seconds"""
@@ -578,11 +580,11 @@ class LockServer:
 
     def run(self):
         """Run the lock server"""
-        web.run_app(self._create_app(), host="127.0.0.1", port=8080)
+        web.run_app(self._create_app(), host=self.host, port=self.port)
 
 
-def start_server():
+def start_server(host: str = "127.0.0.1", port: int = 8080):
     """Global entry point: Start the lock server"""
 
-    print("Medusa lock-server auf http://127.0.0.1:8080 ...")
-    LockServer().run()
+    print(f"Medusa lock-server auf http://{host}:{port} ...")
+    LockServer(host, port).run()

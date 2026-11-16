@@ -8,7 +8,7 @@ import sys
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from .depmgr import ServerDepManager
+from .depmgr import get_dep_manager
 from .robot import run_suite
 from .suite import Result, Status
 from .utils import LOGGER, Timer
@@ -189,30 +189,7 @@ class ProcessManager:
 class Runner:
     def __init__(self, settings: "Settings", stage: "Stage"):
         self.stage = stage
-
-        # TODO(SZI): Runner should just call a function to get the right depmanager,
-        #            depending on whether the CLI options/environment variables for
-        #            server were set. Example:
-        # HERE
-        # self.depmgr: DepManager = get_dep_manager(stage, settings)
-        #
-        # SEPARATE FILE
-        # def get_dep_manager(stage, settings) -> DepManager:
-        #     IMPLEMENTATION
-        #
-        # class DepManager(ABC):
-        #     @abstractmethod
-        #     def try_lock(...):
-        #         pass
-        #
-        # class ServerDepManager(DepManager):
-        #     def try_lock(...):
-        #         IMPLEMENTATION
-        #
-        # class LocalDepManager(DepManager):
-        #     def try_lock(...):
-        #         IMPLEMENTATION
-        self.depmgr = ServerDepManager(stage)
+        self.depmgr = get_dep_manager(stage, settings)
         self.procmgr = ProcessManager(settings)
 
         if sys.stdout.isatty() and settings.log_level == logging.WARNING:

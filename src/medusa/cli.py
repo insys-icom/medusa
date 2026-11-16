@@ -4,7 +4,9 @@ from typing import Any
 
 import requests
 
-SERVER_URL = "http://127.0.0.1:8080"
+from .settings import DEFAULT_SERVER_URL, get_server_url
+
+SERVER_URL = get_server_url() or DEFAULT_SERVER_URL
 
 
 def _parse_dependencies(

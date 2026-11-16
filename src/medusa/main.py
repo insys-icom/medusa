@@ -6,6 +6,7 @@ from docopt import docopt  # type: ignore
 
 from .constants import OUTPUTDIR, REPO_LINK, T_HARD, T_KILL
 from .errors import MedusaError
+from .settings import get_server_url
 from .utils import LOGGER
 
 if TYPE_CHECKING:
@@ -20,7 +21,6 @@ from .cli import (
     show_status,
 )
 
-# TODO(SZI): add ADDRESS/PORT to server command
 # TODO(SZI): add server ADDRESS/PORT to run, lock, free, status commands
 # TODO(SZI): also allow using environment variable eg. MEDUSA_SERVER for server
 #            with run, lock, free, status commands
@@ -32,7 +32,7 @@ HELP = f"""Medusa: Run Robot Framework suites with depdendency-aware paralleliza
 Usage:
   medusa run [-v] [-d OUTPUTDIR] [-f FILTER]... [-t TIMEOUT] [--] ROBOTARGS...
   medusa stats [-v] [-f FILTER]... [-s SELECTION] [--] ROBOTARGS...
-  medusa server
+  medusa server [--host HOST] [--port PORT]
   medusa lock DEVICES...
   medusa free UUID
   medusa status
@@ -73,6 +73,8 @@ Options:
   -t --timeout TIMEOUT      Timeout for each suite. See `help timeout` for a
                             detailed description.
   -v --verbose              Enable debug logging.
+  --host HOST               Address for the Medusa lock server. [default: 127.0.0.1]
+  --port PORT               Port for the Medusa lock server. [default: 8080]
 
 Medusa is open source software licensed under the Apache License, Version 2.0.
 Source code and license text can be viewed at:
@@ -199,7 +201,7 @@ def main() -> None:
         elif arguments["server"]:
             from .server import start_server
 
-            start_server()
+            start_server(arguments["--host"], int(arguments["--port"]))
         else:
             from pathlib import Path
 
@@ -212,7 +214,12 @@ def main() -> None:
             robotargs = arguments["ROBOTARGS"]
             timeout = Timeout.from_argstr(arguments["--timeout"])
             settings = Settings(
-                filters, log_level, outputdir, robotargs, timeout
+                filters,
+                log_level,
+                outputdir,
+                robotargs,
+                timeout,
+                server_url=get_server_url(),
             )
 
             if arguments["run"]:

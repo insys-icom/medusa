@@ -8,6 +8,7 @@ from .dependency_resolver import resolve_dynamic_dependencies
 
 if TYPE_CHECKING:
     from .data import Stage
+    from .settings import Settings
     from .suite import Suite
 
 
@@ -93,7 +94,7 @@ class LocalDepManager(DepManager):
 
 # Dependency Manager over a server to
 class ServerDepManager(DepManager):
-    def __init__(self, stage: "Stage", server_url="http://127.0.0.1:8080"):
+    def __init__(self, stage: "Stage", server_url: str) -> None:
         """Initialize the server dependency manager with the given stage and server URL."""
 
         super().__init__(stage)
@@ -519,3 +520,12 @@ class ServerDepManager(DepManager):
                 self.active_sessions.pop(suite, None)
             else:
                 self.active_sessions[suite] = (session_id, remaining_devices)
+
+
+def get_dep_manager(stage: "Stage", settings: "Settings") -> DepManager:
+    """Create the appropriate dependency manager based on the settings."""
+
+    if settings.server_url:
+        return ServerDepManager(stage, settings.server_url)
+
+    return LocalDepManager(stage)
