@@ -9,6 +9,8 @@ from .settings import DEFAULT_SERVER_URL, get_server_url
 SERVER_URL = get_server_url() or DEFAULT_SERVER_URL
 
 
+# TODO(SZI): Auch hier kann ein unit test gut tun um edge cases abzutesten,
+# frag mich falls unklar wie
 def _parse_dependencies(
     dependencies: list[str],
 ) -> tuple[list[str], dict[str, list[str]]]:
@@ -157,6 +159,13 @@ def _keepalive_loop(session_id: str):
 
         result = _send_keepalive(session_id)
 
+        # TODO(SZI): Auch hier etwas wirr, was drinnen geprintet wird und was
+        # hier draußen. Innen gibt es schon prints für fehlerfall, draußen dann
+        # aber nur für einen von zwei fehlerfällen - entweder beides an beiden
+        # Orten oder beides nur an einem
+        # Hier neige ich auch dazu, diesen Funktionsinhalt in die Funktion
+        # dadrüber zu packen, weil da auch noch fehlerbehandlung und prints
+        # sind und das hier nicht so groß ist
         if result is None:
             # Session was deleted on the server
             break
@@ -195,6 +204,11 @@ def lock_dependencies(dependencies: list[str]) -> None:
 def free_dependencies(session_id: str) -> None:
     """Free the specified devices of a session by sending a release request to the server."""
 
+    # TODO(SZI): Ich würde mich entscheiden, ob du da drin schon den print machst
+    # oder hier draußen - gerade machst du beides :D
+    # Ich neige sogar dazu, dass du die _send_free gar nicht brauchst, weil die
+    # inhaltlich so klein ist, dass die direkt hier rein kann. Das würde das
+    # dann auch lösen.
     if _send_free(session_id):
         print(f"Session '{session_id}' released.")
 

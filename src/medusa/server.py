@@ -211,6 +211,11 @@ class DepLockManager:
         }
 
 
+# TODO(SZI): Bitte die Methoden ein wenig umsortieren, damit es etwas linearer
+# lesbar ist. An erster Stelle die öffentlichen methoden (run()), dann jeweils
+# die nächsten genutzten methoden in der Reihenfolge, in der sie vorkommen
+# (erst die ganzen _handle_... funktionen, dann die funktionen, die in der
+# ersten __handle_... funktion aufgerufen werden, etc.)
 class LockServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 8080):
         self.pool = DepLockManager()
@@ -559,6 +564,7 @@ class LockServer:
 
         return web.json_response(result, status=200)
 
+    # TODO(SZI): Das kann für mich direkt in run() rein
     def _create_app(self):
         """Create and configure the web application"""
 

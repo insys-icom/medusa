@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from .data import Data
     from .settings import Settings
 
+# TODO(SZI): Die imports wie auch beim server befehl direkt an die stelle
+# packen, wo sie benutzt werden. Je weniger imports direkt beim Öffnen des
+# Moduls, desto schneller die initiale Ladezeit des Programms.
 from .cli import (
     free_dependencies,
     lock_dependencies,
@@ -201,6 +204,12 @@ def main() -> None:
         elif arguments["server"]:
             from .server import start_server
 
+            # TODO(SZI): das mit dem int() kann hier eine exception werfen,
+            # lieber vorab machen und im exception fall einen schöneren fehler
+            # ausgeben.
+            # Und generell, hier einfach nur stumpf die rohen Werte übergeben
+            # und die Umwandelung/Fehlerbearbeitung dann in start_server machen
+            # damit es hier übersichtlich bleibt.
             start_server(arguments["--host"], int(arguments["--port"]))
         else:
             from pathlib import Path

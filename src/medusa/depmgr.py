@@ -12,6 +12,15 @@ if TYPE_CHECKING:
     from .suite import Suite
 
 
+# TODO(SZI): Allgemein logging nicht mit print machen sondern mit der
+# `logging` library, siehe andere module - da kann man dann auch verschiedene
+# log-levels nutzen (info, warning, error) und es wird korrekt nach
+# stdout/stderr und datei geloggt.
+# print benutze ich nur für CLI meldungen, die nicht logmeldungen im
+# klassischen sinn sind sondern z.B. statusausgabe oder wichtige Schritte im
+# Ablauf. schau mal einfach wo ich print und wo ich logging benutze! :)
+
+
 class DepManager(ABC):
     def __init__(self, stage: "Stage") -> None:
         all_deps: set[str] = set(stage.deps_static_cnt).union(
@@ -27,6 +36,8 @@ class DepManager(ABC):
     def free(self, suite: "Suite", devices: set[str] | None = None) -> None:
         """Release the dependencies assigned to a suite."""
 
+    # TODO(SZI): Wie unterscheidet sich das von free()? Bitte mir einmal
+    # erklären :)
     def finish(self, suite: "Suite") -> None:
         """Finish dependency management for a completed suite."""
 
