@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 # packen, wo sie benutzt werden. Je weniger imports direkt beim Öffnen des
 # Moduls, desto schneller die initiale Ladezeit des Programms.
 from .cli import (
-    free_dependencies,
+    free,
     lock_dependencies,
     show_status,
 )
@@ -198,7 +198,7 @@ def main() -> None:
         elif arguments["lock"]:
             lock_dependencies(arguments["DEVICES"])
         elif arguments["free"]:
-            free_dependencies(arguments["UUID"])
+            free(arguments["UUID"])
         elif arguments["status"]:
             show_status()
         elif arguments["server"]:
