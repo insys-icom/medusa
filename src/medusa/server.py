@@ -211,40 +211,172 @@ class DepLockManager:
         }
 
 
-# TODO(SZI): Bitte die Methoden ein wenig umsortieren, damit es etwas linearer
-# lesbar ist. An erster Stelle die öffentlichen methoden (run()), dann jeweils
-# die nächsten genutzten methoden in der Reihenfolge, in der sie vorkommen
-# (erst die ganzen _handle_... funktionen, dann die funktionen, die in der
-# ersten __handle_... funktion aufgerufen werden, etc.)
 class LockServer:
-    def __init__(self, host: str = "127.0.0.1", port: int = 8080):
+    def __init__(self, host: str = "127.0.0.1", port: int = 8081):
         self.pool = DepLockManager()
         self.host = host
         self.port = port
 
-    async def _cleanup_loop(self):
-        """Clean up expired locks every 5 seconds"""
+    def run(self):
+        """Create and configure the web application and run the lock server."""
 
-        while True:
-            async with self.pool.server_mutex:
-                self.pool._check_and_reclaim_expired_locks(timeout_seconds=30)
+        app = web.Application()
 
-            await asyncio.sleep(5)
+        app.add_routes(
+            [
+                web.get("/status", self._handle_status),
+                web.post("/lock", self._handle_lock),
+                web.post("/free", self._handle_free),
+                web.post("/alive", self._handle_alive),
+            ]
+        )
 
-    async def _on_startup(self, app):
-        """Create cleanup-task when the application was started"""
+        app.on_startup.append(self._on_startup)
+        app.on_cleanup.append(self._on_cleanup)
 
-        app["cleanup_task"] = asyncio.create_task(self._cleanup_loop())
+        return web.run_app(app, host=self.host, port=self.port)
 
-    async def _on_cleanup(self, app):
-        """Stop cleanup-task when application ends"""
+    async def _handle_lock(self, request):
+        """Function for locking dependencies according to "all or nothing"-principle"""
 
-        app["cleanup_task"].cancel()
+        # 1. Payload parsing & validation
+        parsed = await self._parse_lock_request(request)
 
-        try:
-            await app["cleanup_task"]
-        except asyncio.CancelledError:
-            pass
+        if isinstance(parsed, web.Response):
+            return parsed
+
+        session_id, static_raw, dynamic_raw = parsed
+
+        # 2. Prepare dependencies
+        prepared = self._prepare_lock_dependencies(static_raw, dynamic_raw)
+
+        if isinstance(prepared, web.Response):
+            return prepared
+
+        static_deps, dynamic_options = prepared
+
+        async with self.pool.server_mutex:
+            # 3. Preventive Cleanup: Prevents orphaned locks from blocking the system
+            self.pool._check_and_reclaim_expired_locks()
+
+            # 4. Check availability & assign dependencies
+            lock_data = self.pool._resolve_and_assign_dependencies(
+                session_id,
+                static_deps,
+                dynamic_options,
+            )
+
+        # 5. Unavailable: Return immediately without acquiring any locks
+        if lock_data["status"] == "unavailable":
+            print(
+                "[SERVER] Some Dependencies from lock-request are unavailable."
+            )
+            return web.json_response(lock_data, status=409)
+
+        if lock_data["status"] == "error":
+            return web.json_response(lock_data, status=404)
+
+        # 6. Lock successfully acquired
+        session = lock_data["session"]
+        assigned_dynamic = lock_data["assigned_dynamic"]
+
+        print(
+            f"[SERVER] Lock granted for {sorted(session.devices)}. (Session: {session.uuid})"
+        )
+
+        # 7. Return lock confirmation
+        return web.json_response(
+            {
+                "status": "locked",
+                "session_id": session.uuid,
+                "devices": sorted(session.devices),
+                "deps_assigned": assigned_dynamic,
+            }
+        )
+
+    async def _handle_alive(self, request):
+        """Update the last_alive timestamp of an existing session"""
+
+        session_id = await self._parse_alive_request(request)
+
+        if isinstance(session_id, web.Response):
+            return session_id
+
+        async with self.pool.server_mutex:
+            self.pool._check_and_reclaim_expired_locks()
+
+            session = self.pool.sessions.get(session_id)
+
+            if session is None:
+                print(f"[ALIVE] Unknown session: {session_id}")
+                return web.json_response(
+                    {
+                        "status": "error",
+                        "message": "Unknown session",
+                    },
+                    status=404,
+                )
+
+            session.last_alive = datetime.now(UTC)
+            last_alive = session.last_alive
+
+        readable_time = self._format_datetime(last_alive)
+
+        print(
+            f"[ALIVE] Session '{session_id}' updated last_alive to {readable_time}"
+        )
+
+        return web.json_response(
+            {
+                "status": "alive",
+                "session_id": session_id,
+            }
+        )
+
+    async def _handle_free(self, request):
+        """Release all or selected devices belonging to a session"""
+
+        # 1. Payload parsing & validation
+        parsed = await self._parse_free_request(request)
+
+        if isinstance(parsed, web.Response):
+            return parsed
+
+        session_id, devices = parsed
+
+        # 2. Clean up expired sessions and release requested devices
+        async with self.pool.server_mutex:
+            self.pool._check_and_reclaim_expired_locks()
+            result = self.pool._release_session(session_id, devices)
+
+        # 3. Return result
+        if result["status"] == "error":
+            return web.json_response(result, status=404)
+
+        if result["status"] == "rejected":
+            return web.json_response(result, status=409)
+
+        return web.json_response(result, status=200)
+
+    async def _handle_status(self, request):
+        """Shows all active sessions and their locked devices"""
+
+        print("[SERVER] Global status dashboard request received.")
+
+        async with self.pool.server_mutex:
+            self.pool._check_and_reclaim_expired_locks()
+
+            sessions = [
+                {
+                    "session_id": session.uuid,
+                    "devices": sorted(session.devices),
+                    "since": self._format_datetime(session.since),
+                    "last_alive": self._format_datetime(session.last_alive),
+                }
+                for session in self.pool.sessions.values()
+            ]
+
+        return web.json_response({"sessions": sessions})
 
     async def _parse_lock_request(self, request_data):
         """Parse and validate a lock request containing static and dynamic dependencies"""
@@ -338,6 +470,41 @@ class LockServer:
 
         return static_deps, dynamic_options
 
+    async def _parse_alive_request(self, request):
+        """Parse and validate a keepalive request"""
+
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response(
+                {"status": "error", "messaqe": "Malformed JSON payload."},
+                status=400,
+            )
+
+        if not isinstance(body, dict):
+            return web.json_response(
+                {"status": "error", "messaqe": "Invalid request body."},
+                status=400,
+            )
+
+        session_id = body.get("session_id")
+
+        if not isinstance(session_id, str) or not session_id:
+            return web.json_response(
+                {
+                    "status": "error",
+                    "messaqe": "Missing or invalid session_id.",
+                },
+                status=400,
+            )
+
+        return session_id
+
+    @staticmethod
+    def _format_datetime(value: datetime) -> str:
+        """Format a datetime in the local timezone"""
+        return value.replace(microsecond=0).astimezone().isoformat()
+
     async def _parse_free_request(self, request):
         """Parse and validate a session_id and optional devices from a free request"""
 
@@ -387,209 +554,32 @@ class LockServer:
 
         return session_id, devices
 
-    async def _parse_alive_request(self, request):
-        """Parse and validate a keepalive request"""
+    async def _cleanup_loop(self):
+        """Clean up expired locks every 5 seconds"""
+
+        while True:
+            async with self.pool.server_mutex:
+                self.pool._check_and_reclaim_expired_locks(timeout_seconds=30)
+
+            await asyncio.sleep(5)
+
+    async def _on_startup(self, app):
+        """Create cleanup-task when the application was started"""
+
+        app["cleanup_task"] = asyncio.create_task(self._cleanup_loop())
+
+    async def _on_cleanup(self, app):
+        """Stop cleanup-task when application ends"""
+
+        app["cleanup_task"].cancel()
 
         try:
-            body = await request.json()
-        except Exception:
-            return web.json_response(
-                {"status": "error", "messaqe": "Malformed JSON payload."},
-                status=400,
-            )
-
-        if not isinstance(body, dict):
-            return web.json_response(
-                {"status": "error", "messaqe": "Invalid request body."},
-                status=400,
-            )
-
-        session_id = body.get("session_id")
-
-        if not isinstance(session_id, str) or not session_id:
-            return web.json_response(
-                {
-                    "status": "error",
-                    "messaqe": "Missing or invalid session_id.",
-                },
-                status=400,
-            )
-
-        return session_id
-
-    @staticmethod
-    def _format_datetime(value: datetime) -> str:
-        """Format a datetime in the local timezone"""
-        return value.replace(microsecond=0).astimezone().isoformat()
-
-    async def _handle_status(self, request):
-        """Shows all active sessions and their locked devices"""
-
-        print("[SERVER] Global status dashboard request received.")
-
-        async with self.pool.server_mutex:
-            self.pool._check_and_reclaim_expired_locks()
-
-            sessions = [
-                {
-                    "session_id": session.uuid,
-                    "devices": sorted(session.devices),
-                    "since": self._format_datetime(session.since),
-                    "last_alive": self._format_datetime(session.last_alive),
-                }
-                for session in self.pool.sessions.values()
-            ]
-
-        return web.json_response({"sessions": sessions})
-
-    async def _handle_alive(self, request):
-        """Update the last_alive timestamp of an existing session"""
-
-        session_id = await self._parse_alive_request(request)
-
-        if isinstance(session_id, web.Response):
-            return session_id
-
-        async with self.pool.server_mutex:
-            self.pool._check_and_reclaim_expired_locks()
-
-            session = self.pool.sessions.get(session_id)
-
-            if session is None:
-                print(f"[ALIVE] Unknown session: {session_id}")
-                return web.json_response(
-                    {
-                        "status": "error",
-                        "message": "Unknown session",
-                    },
-                    status=404,
-                )
-
-            session.last_alive = datetime.now(UTC)
-            last_alive = session.last_alive
-
-        readable_time = self._format_datetime(last_alive)
-
-        print(
-            f"[ALIVE] Session '{session_id}' updated last_alive to {readable_time}"
-        )
-
-        return web.json_response(
-            {
-                "status": "alive",
-                "session_id": session_id,
-            }
-        )
-
-    async def _handle_lock(self, request):
-        """Function for locking dependencies according to "all or nothing"-principle"""
-
-        # 1. Payload parsing & validation
-        parsed = await self._parse_lock_request(request)
-
-        if isinstance(parsed, web.Response):
-            return parsed
-
-        session_id, static_raw, dynamic_raw = parsed
-
-        # 2. Prepare dependencies
-        prepared = self._prepare_lock_dependencies(static_raw, dynamic_raw)
-
-        if isinstance(prepared, web.Response):
-            return prepared
-
-        static_deps, dynamic_options = prepared
-
-        async with self.pool.server_mutex:
-            # 3. Preventive Cleanup: Prevents orphaned locks from blocking the system
-            self.pool._check_and_reclaim_expired_locks()
-
-            # 4. Check availability & assign dependencies
-            lock_data = self.pool._resolve_and_assign_dependencies(
-                session_id,
-                static_deps,
-                dynamic_options,
-            )
-
-        # 5. Unavailable: Return immediately without acquiring any locks
-        if lock_data["status"] == "unavailable":
-            print(
-                "[SERVER] Some Dependencies from lock-request are unavailable."
-            )
-            return web.json_response(lock_data, status=409)
-
-        if lock_data["status"] == "error":
-            return web.json_response(lock_data, status=404)
-
-        # 6. Lock successfully acquired
-        session = lock_data["session"]
-        assigned_dynamic = lock_data["assigned_dynamic"]
-
-        print(
-            f"[SERVER] Lock granted for {sorted(session.devices)}. (Session: {session.uuid})"
-        )
-
-        # 7. Return lock confirmation
-        return web.json_response(
-            {
-                "status": "locked",
-                "session_id": session.uuid,
-                "devices": sorted(session.devices),
-                "deps_assigned": assigned_dynamic,
-            }
-        )
-
-    async def _handle_free(self, request):
-        """Release all or selected devices belonging to a session"""
-
-        # 1. Payload parsing & validation
-        parsed = await self._parse_free_request(request)
-
-        if isinstance(parsed, web.Response):
-            return parsed
-
-        session_id, devices = parsed
-
-        # 2. Clean up expired sessions and release requested devices
-        async with self.pool.server_mutex:
-            self.pool._check_and_reclaim_expired_locks()
-            result = self.pool._release_session(session_id, devices)
-
-        # 3. Return result
-        if result["status"] == "error":
-            return web.json_response(result, status=404)
-
-        if result["status"] == "rejected":
-            return web.json_response(result, status=409)
-
-        return web.json_response(result, status=200)
-
-    # TODO(SZI): Das kann für mich direkt in run() rein
-    def _create_app(self):
-        """Create and configure the web application"""
-
-        app = web.Application()
-
-        app.add_routes(
-            [
-                web.get("/status", self._handle_status),
-                web.post("/lock", self._handle_lock),
-                web.post("/free", self._handle_free),
-                web.post("/alive", self._handle_alive),
-            ]
-        )
-
-        app.on_startup.append(self._on_startup)
-        app.on_cleanup.append(self._on_cleanup)
-
-        return app
-
-    def run(self):
-        """Run the lock server"""
-        web.run_app(self._create_app(), host=self.host, port=self.port)
+            await app["cleanup_task"]
+        except asyncio.CancelledError:
+            pass
 
 
-def start_server(host: str = "127.0.0.1", port: int = 8080):
+def start_server(host: str = "127.0.0.1", port: int = 8081):
     """Global entry point: Start the lock server"""
 
     print(f"Medusa lock-server auf http://{host}:{port} ...")
