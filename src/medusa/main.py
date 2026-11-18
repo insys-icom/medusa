@@ -15,15 +15,6 @@ if TYPE_CHECKING:
     from .data import Data
     from .settings import Settings
 
-# TODO(SZI): Die imports wie auch beim server befehl direkt an die stelle
-# packen, wo sie benutzt werden. Je weniger imports direkt beim Öffnen des
-# Moduls, desto schneller die initiale Ladezeit des Programms.
-from .cli import (
-    free,
-    lock_dependencies,
-    show_status,
-)
-
 # TODO(SZI): add server ADDRESS/PORT to run, lock, free, status commands
 # TODO(SZI): also allow using environment variable eg. MEDUSA_SERVER for server
 #            with run, lock, free, status commands
@@ -196,10 +187,13 @@ def main() -> None:
 
             print(__version__)
         elif arguments["lock"]:
+            from .cli import lock_dependencies
             lock_dependencies(arguments["DEVICES"])
         elif arguments["free"]:
+            from .cli import free
             free(arguments["UUID"])
         elif arguments["status"]:
+            from .cli import show_status
             show_status()
         elif arguments["server"]:
             from .server import start_server
