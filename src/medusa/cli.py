@@ -56,7 +56,7 @@ def lock_dependencies(dependencies: list[str]) -> None:
             )
 
 
-def free(session_id: str) -> None:
+def free(session_id: str) -> bool:
     """Free the specified devices of a session by sending a release request to the server."""
 
     payload = {"session_id": session_id}
@@ -65,15 +65,15 @@ def free(session_id: str) -> None:
         response = requests.post(f"{SERVER_URL}/free", json=payload, timeout=5)
     except requests.RequestException as exc:
         print(f"Failed to contact server: {exc}")
-        return
+        return False
 
     if response.status_code != 200:
         print(f"Free request failed: {response.status_code} {response.text}")
-        return
+        return False
 
     result = response.json()
     print(f"Freed dependencies: {result.get('devices', [])}")
-    print(f"Session '{session_id}' released.")
+    return True
 
 
 def _print_status(data: dict):
@@ -113,8 +113,6 @@ def _format_datetime(value: str) -> str:
     return datetime.fromisoformat(value).astimezone().strftime("%H:%M:%S")
 
 
-# TODO(SZI): Auch hier kann ein unit test gut tun um edge cases abzutesten,
-# frag mich falls unklar wie
 def _parse_dependencies(
     dependencies: list[str],
 ) -> tuple[list[str], dict[str, list[str]]]:
