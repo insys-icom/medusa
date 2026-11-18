@@ -1,47 +1,57 @@
-# TODO(SZI): Dafür würde ich gerne einen unit test haben, da du die funktion
-# schon sehr schön rausgetrennt hast! Nimm dir den test_filter_dynamic in
-# tests/filters_test.py als Beispiel und besprich es kurz mit mir nachdem du es
-# dir angeschaut hast :)
-# Mir fehlt hier aber noch mehr Doku über die Ein- und Rückgabewerte, wie bei
-# der originalen try_assign_deps funktion.
-# Da die Funktion von der Logik her relativ komplex ist, hat sie auf jeden Fall
-# mehr Erklärung nötig. Auch die ganzen Kommentare übner die Logik würde ich
-# wieder einfügen, damit der algorithmus hier auch in menschensprache
-# nachvollziehbar ist
 def resolve_dynamic_dependencies(
-    # TODO(SZI): Ich würde das nicht available options nennen, es sind ja nicht
-    # nur die Optionen sondern ein dict aus zielvariable und optionen, also die
-    # ganzen dyndeps
-    available_options: dict[str, set[str]],
+    dynamic_dependencies: dict[str, set[str]],
 ) -> dict[str, str] | None:
-    """Assign a distinct available option to every dynamic dependency."""
+    """Resolve dynamic dependencies by assigning distinct available options.
 
-    if not available_options:
-        # TODO(SZI): Für solche neuen Fälle wäre eine Erklärung auch gut, z.B.
-        # Suite does not have dynamic dependencies, nothing to assign
+    Args:
+        dynamic_dependencies: A dictionary mapping each dynamic dependency
+                              name to a set of possible devices.
+
+    Returns:
+        A dictionary mapping each dependency name to its assigned device.
+        Returns an empty dictionary if there are no dynamic dependencies.
+        Returns None if no valid assignment exists.
+    """
+
+    if not dynamic_dependencies:
+        # Suite does not have dynamic dependencies -> nothing to assign
         return {}
 
-    if any(not options for options in available_options.values()):
+    # Every dynamic dependency needs at least one possible device
+    # If any dependency has no options, a complete assignment is impossible
+    if any(not options for options in dynamic_dependencies.values()):
         return None
 
+    # Maps each assigned device to the dependency that currently owns it
+    # This makes it possible to find and rearrange existing assignments
     option_owner: dict[str, str] = {}
 
     def try_assign(dep_name: str, seen: set[str]) -> bool:
-        for option in sorted(available_options[dep_name]):
+        # Try each possible device in a deterministic order
+        for option in sorted(dynamic_dependencies[dep_name]):
+            # Do not examine the same device twice during one assignment attempt
             if option in seen:
                 continue
 
             seen.add(option)
             owner = option_owner.get(option)
 
+            # If the device is free, assign it directly
+            # If it is already assigned, try to move its current owner to another
+            # device before taking it over.
             if owner is None or try_assign(owner, seen):
                 option_owner[option] = dep_name
                 return True
 
+        # No available device could be assigned to this dependency
         return False
 
-    for name in available_options:
+    # Try to assign a distinct device to every dynamic dependency
+    # If even one dependency cannot be assigned, no complete matching exists
+    for name in dynamic_dependencies:
         if not try_assign(name, set()):
             return None
 
+    # The internal mapping is device -> dependency
+    # Convert it to the expected dependency -> device mapping
     return {dep_name: option for option, dep_name in option_owner.items()}
