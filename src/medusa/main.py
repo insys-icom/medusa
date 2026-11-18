@@ -1,4 +1,5 @@
 import logging
+import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -6,7 +7,6 @@ from docopt import docopt  # type: ignore
 
 from .constants import OUTPUTDIR, REPO_LINK, T_HARD, T_KILL
 from .errors import MedusaError
-from .settings import get_server_url
 from .utils import LOGGER
 
 if TYPE_CHECKING:
@@ -228,7 +228,7 @@ def main() -> None:
                 outputdir,
                 robotargs,
                 timeout,
-                server_url=get_server_url(),
+                server_url=os.environ.get("MEDUSA_SERVER_URL"),
             )
 
             if arguments["run"]:

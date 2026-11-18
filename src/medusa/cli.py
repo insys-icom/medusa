@@ -4,9 +4,10 @@ from typing import Any
 
 import requests
 
-from .settings import DEFAULT_SERVER_URL, get_server_url
+from .constants import DEFAULT_SERVER_URL
+import os
 
-SERVER_URL = get_server_url() or DEFAULT_SERVER_URL
+SERVER_URL = os.environ.get("MEDUSA_SERVER") or f"http://{DEFAULT_SERVER_URL}"
 
 
 # TODO(SZI): Auch hier kann ein unit test gut tun um edge cases abzutesten,

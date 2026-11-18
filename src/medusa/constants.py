@@ -6,3 +6,4 @@ OUTPUTDIR = Path("results", datetime.now().strftime("%Y-%m-%d_%H%M%S"))
 REPO_LINK = "https://github.com/insys-icom/medusa"
 T_HARD = 60
 T_KILL = 10
+DEFAULT_SERVER_URL = "127.0.0.1:8081"
