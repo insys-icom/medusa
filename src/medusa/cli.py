@@ -1,3 +1,4 @@
+import os
 import time
 from datetime import datetime
 from typing import Any
@@ -5,9 +6,111 @@ from typing import Any
 import requests
 
 from .constants import DEFAULT_SERVER_URL
-import os
 
 SERVER_URL = os.environ.get("MEDUSA_SERVER") or f"http://{DEFAULT_SERVER_URL}"
+
+
+def show_status():
+    """Send status-request and print current server status"""
+
+    try:
+        response = requests.get(f"{SERVER_URL}/status", timeout=5)
+    except requests.RequestException as exc:
+        print(f"Status request failed: {exc}")
+        return
+
+    if response.status_code != 200:
+        print(f"Status rejected: {response.status_code} {response.text}")
+        return
+
+    try:
+        data = response.json()
+    except ValueError:
+        print("Status request returned invalid JSON.")
+        return
+
+    _print_status(data)
+
+
+def lock_dependencies(dependencies: list[str]) -> None:
+    """Lock the specified dependencies and maintain the session alive until interrupted."""
+
+    static_deps, dynamic_deps = _parse_dependencies(dependencies)
+    session_id = _send_lock(static_deps, dynamic_deps)
+
+    if not session_id:
+        return
+
+    print(f"Session ID: {session_id}")
+
+    try:
+        _keepalive(session_id)
+    except KeyboardInterrupt:
+        print("\nLock session interrupted.")
+
+        if free(session_id):
+            print(f"Session '{session_id}' released.")
+        else:
+            print(
+                f"Could not release session '{session_id}'. The server will reclaim it after timeout."
+            )
+
+
+def free(session_id: str) -> None:
+    """Free the specified devices of a session by sending a release request to the server."""
+
+    payload = {"session_id": session_id}
+
+    try:
+        response = requests.post(f"{SERVER_URL}/free", json=payload, timeout=5)
+    except requests.RequestException as exc:
+        print(f"Failed to contact server: {exc}")
+        return
+
+    if response.status_code != 200:
+        print(f"Free request failed: {response.status_code} {response.text}")
+        return
+
+    result = response.json()
+    print(f"Freed dependencies: {result.get('devices', [])}")
+    print(f"Session '{session_id}' released.")
+
+
+def _print_status(data: dict):
+    """Print active sessions and their locked devices"""
+
+    sessions = data.get("sessions", [])
+
+    if not sessions:
+        print("No active locks.")
+        return
+
+    print(
+        "============================== ACTIVE LOCKS =============================="
+    )
+    print(f"{'SESSION':<38} {'DEVICES':<10} {'SINCE':<12} {'LAST ALIVE'}")
+    print("=" * 74)  # Devider
+
+    for session in sessions:
+        session_id = session["session_id"]
+        since = _format_datetime(session["since"])
+        last_alive = _format_datetime(session["last_alive"])
+        devices = session["devices"]
+
+        for index, device in enumerate(devices):
+            if index == 0:
+                print(
+                    f"{session_id:<38} {device:<10} {since:<12} {last_alive}"
+                )
+            else:
+                print(f"{'':<38} {device:<10} {'':<12} {'':<12}")
+
+        print("-" * 74)  # Devider
+
+
+def _format_datetime(value: str) -> str:
+    """Format an ISO-8601 datetime as local time."""
+    return datetime.fromisoformat(value).astimezone().strftime("%H:%M:%S")
 
 
 # TODO(SZI): Auch hier kann ein unit test gut tun um edge cases abzutesten,
@@ -69,66 +172,6 @@ def _send_lock(
     return session_id
 
 
-def _format_datetime(value: str) -> str:
-    """Format an ISO-8601 datetime as local time."""
-    return datetime.fromisoformat(value).astimezone().strftime("%H:%M:%S")
-
-
-def _print_status(data: dict):
-    """Print active sessions and their locked devices"""
-
-    sessions = data.get("sessions", [])
-
-    if not sessions:
-        print("No active locks.")
-        return
-
-    print(
-        "============================== ACTIVE LOCKS =============================="
-    )
-    print(f"{'SESSION':<38} {'DEVICES':<10} {'SINCE':<12} {'LAST ALIVE'}")
-    print("=" * 74)  # Devider
-
-    for session in sessions:
-        session_id = session["session_id"]
-        since = _format_datetime(session["since"])
-        last_alive = _format_datetime(session["last_alive"])
-        devices = session["devices"]
-
-        for index, device in enumerate(devices):
-            if index == 0:
-                print(
-                    f"{session_id:<38} {device:<10} {since:<12} {last_alive}"
-                )
-            else:
-                print(f"{'':<38} {device:<10} {'':<12} {'':<12}")
-
-        print("-" * 74)  # Devider
-
-
-def lock_dependencies(dependencies: list[str]) -> None:
-    """Lock the specified dependencies and maintain the session alive until interrupted."""
-
-    static_deps, dynamic_deps = _parse_dependencies(dependencies)
-    session_id = _send_lock(static_deps, dynamic_deps)
-
-    if not session_id:
-        return
-
-    print(f"Session ID: {session_id}")
-
-    try:
-        _keepalive(session_id)
-    except KeyboardInterrupt:
-        print("\nLock session interrupted.")
-
-        if free(session_id):
-            print(f"Session '{session_id}' released.")
-        else:
-            print(
-                f"Could not release session '{session_id}'. The server will reclaim it after timeout."
-            )
-
 def _keepalive(session_id: str) -> None:
     """Keep the session alive on the server until it is gone or a request fails."""
 
@@ -152,46 +195,7 @@ def _keepalive(session_id: str) -> None:
             return
 
         if response.status_code != 200:
-            print(f"Keepalive rejected: {response.status_code} {response.text}")
+            print(
+                f"Keepalive rejected: {response.status_code} {response.text}"
+            )
             return
-
-def free(session_id: str) -> None:
-    """Free the specified devices of a session by sending a release request to the server."""
-
-    payload = {"session_id": session_id}
-
-    try:
-        response = requests.post(f"{SERVER_URL}/free", json=payload, timeout=5)
-    except requests.RequestException as exc:
-        print(f"Failed to contact server: {exc}")
-        return
-
-    if response.status_code != 200:
-        print(f"Free request failed: {response.status_code} {response.text}")
-        return
-
-    result = response.json()
-    print(f"Freed dependencies: {result.get('devices', [])}")
-    print(f"Session '{session_id}' released.")
-
-
-def show_status():
-    """Send status-request and print current server status"""
-
-    try:
-        response = requests.get(f"{SERVER_URL}/status", timeout=5)
-    except requests.RequestException as exc:
-        print(f"Status request failed: {exc}")
-        return
-
-    if response.status_code != 200:
-        print(f"Status rejected: {response.status_code} {response.text}")
-        return
-
-    try:
-        data = response.json()
-    except ValueError:
-        print("Status request returned invalid JSON.")
-        return
-
-    _print_status(data)
