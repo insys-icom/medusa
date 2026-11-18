@@ -24,5 +24,5 @@ def test_resolve_dynamic_dependencies(
     dependencies: dict[str, set[str]],
     expected: dict[str, str] | None,
 ) -> None:
-    output = resolve_dynamic_dependencies(dependencies) # Act
-    assert output == expected   # Assert
+    output = resolve_dynamic_dependencies(dependencies)  # Act
+    assert output == expected  # Assert

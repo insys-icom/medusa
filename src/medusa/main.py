@@ -188,12 +188,15 @@ def main() -> None:
             print(__version__)
         elif arguments["lock"]:
             from .cli import lock_dependencies
+
             lock_dependencies(arguments["DEVICES"])
         elif arguments["free"]:
             from .cli import free
+
             free(arguments["UUID"])
         elif arguments["status"]:
             from .cli import show_status
+
             show_status()
         elif arguments["server"]:
             from .server import start_server
