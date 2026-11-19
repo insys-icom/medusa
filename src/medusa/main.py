@@ -207,7 +207,7 @@ def main() -> None:
             # Und generell, hier einfach nur stumpf die rohen Werte übergeben
             # und die Umwandelung/Fehlerbearbeitung dann in start_server machen
             # damit es hier übersichtlich bleibt.
-            start_server(arguments["--host"], int(arguments["--port"]))
+            start_server(arguments["--host"], arguments["--port"])
         else:
             from pathlib import Path
 

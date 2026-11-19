@@ -579,8 +579,16 @@ class LockServer:
             pass
 
 
-def start_server(host: str = "127.0.0.1", port: int = 8081):
+def start_server(host: str = "127.0.0.1", port: str = "8081"):
     """Global entry point: Start the lock server"""
 
-    print(f"Medusa lock-server auf http://{host}:{port} ...")
-    LockServer(host, port).run()
+    try:
+        port_number = int(port)
+    except ValueError:
+        raise ValueError(f"Invalid port '{port}'. Port must be an integer.")
+
+    if not 1 <= port_number <= 65535:
+        raise ValueError(f"Invalid port '{port}'. Port must be between 1 and 65535.")
+
+    print(f"Medusa lock-server auf http://{host}:{port_number} ...")
+    LockServer(host, port_number).run()
