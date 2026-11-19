@@ -201,12 +201,6 @@ def main() -> None:
         elif arguments["server"]:
             from .server import start_server
 
-            # TODO(SZI): das mit dem int() kann hier eine exception werfen,
-            # lieber vorab machen und im exception fall einen schöneren fehler
-            # ausgeben.
-            # Und generell, hier einfach nur stumpf die rohen Werte übergeben
-            # und die Umwandelung/Fehlerbearbeitung dann in start_server machen
-            # damit es hier übersichtlich bleibt.
             start_server(arguments["--host"], arguments["--port"])
         else:
             from pathlib import Path
