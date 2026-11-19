@@ -225,7 +225,7 @@ def main() -> None:
                 outputdir,
                 robotargs,
                 timeout,
-                server_url=os.environ.get("MEDUSA_SERVER_URL"),
+                server_url=os.environ.get("MEDUSA_SERVER"),
             )
 
             if arguments["run"]:
