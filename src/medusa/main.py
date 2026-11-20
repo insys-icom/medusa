@@ -16,9 +16,7 @@ if TYPE_CHECKING:
     from .data import Data
     from .settings import Settings
 
-# TODO(SZI): remove medusa help status command
-# TODO(SZI): consolidate medusa help lock|free, turn it into general help text
-#            about server|lock|free|status usage and how that works
+
 HELP = f"""Medusa: Run Robot Framework suites with depdendency-aware parallelization
 
 Usage:
@@ -28,7 +26,7 @@ Usage:
   medusa lock DEVICES... [--server SERVER]
   medusa free UUID [--server SERVER]
   medusa status [--server SERVER]
-  medusa help [filter|timeout|lock|free|status]
+  medusa help [filter|timeout|server]
   medusa version
 
 Subcommands:
@@ -39,9 +37,7 @@ Subcommands:
   server         Start the Medusa lock server.
   lock           Lock dependencies using the lock server.
   free           Release a lock session.
-  status         Show currently active sessions. For each session status shows
-                 which dependencies are locked, since when they are locked and
-                 when the last keepalive-request arrived.
+  status         Show currently active lock sessions.
   version        Show Medusa version.
 
 Arguments:
@@ -65,9 +61,11 @@ Options:
   -t --timeout TIMEOUT      Timeout for each suite. See `help timeout` for a
                             detailed description.
   -v --verbose              Enable debug logging.
-  --host HOST               Address for the Medusa lock server. [default: 127.0.0.1]
-  --port PORT               Port for the Medusa lock server. [default: 8081]
-  --server SERVER           Adress of the Medusa lock server (HOST[:PORT]).
+  --host HOST               Address the Medusa lock server listens on.
+                            [default: 127.0.0.1]
+  --port PORT               Port the Medusa lock server listens on.
+                            [default: 8081]
+  --server SERVER           Address of the Medusa lock server (HOST[:PORT]).
 
 Medusa is open source software licensed under the Apache License, Version 2.0.
 Source code and license text can be viewed at:
@@ -126,36 +124,64 @@ HELP_FILTER = """Filters:
                         # for those that also contain 'two'.
 """
 
-HELP_LOCK = """Lock:
-  Lock one or more dependencies using the Medusa lock server.
+HELP_SERVER = """Server:
+  Manage dependencies across multiple Medusa instances using the lock server.
 
-  Usage:
-    medusa lock DEVICES...
+  Commands:
+    medusa server [--host HOST] [--port PORT]
+        Start the Medusa lock server.
 
-  DEVICES can contain static dependencies or dynamic dependencies.
+    medusa run [--server SERVER] [--] ROBOTARGS...
+        Run the given Robot Framework suites.
+        If a server is configured, dependencies are managed through the lock server.
+        Otherwise, the local dependency manager is used.
 
-  Dynamic dependencies use the following format:
+    medusa lock DEVICES... [--server SERVER]
+        Lock one or more dependencies. Supports static and dynamic dependencies.
+        The command stays active and sends periodic keepalive requests.
+        Press Ctrl+C to release the session.
+
+    medusa free UUID [--server SERVER]
+        Release all dependencies belonging to the specified session.
+        UUID is the session ID shown by 'medusa status'.
+
+    medusa status [--server SERVER]
+        Show active lock sessions, their locked dependencies and keepalive times.
+
+  Dynamic dependencies use the format:
     dynamic:NAME=DEVICE1,DEVICE2
 
+  Server configuration:
+    Server startup:
+        --host HOST     Address the server listens on. [default: 127.0.0.1]
+        --port PORT     Port the server listens on. [default: 8081]
+
+  Client connection:
+    --server SERVER     Specify the server address (HOST[:PORT]).
+    MEDUSA_SERVER       Environment variable for the server address.
+
+  --server takes precedence over MEDUSA_SERVER.
+  If neither is specified, lock, free and status use 127.0.0.1:8081.
+  For run, a server is only used if --server or MEDUSA_SERVER is set.
+  Otherwise, the local dependency manager is used.
+
   Examples:
+    # Start the lock server
+    medusa server --host 127.0.0.1 --port 8081
+
+    # Connect clients to a specific server
+    medusa run tests/robot/test.robot --server 127.0.0.1:8081
+    medusa lock device1 device2 --server 127.0.0.1:8081
+    medusa lock dynamic:deviceGroup=device1,device2 --server 127.0.0.1:8081
+    medusa free 123e4567-e89b-12d3-a456-426614174000 --server 127.0.0.1:8081
+    medusa status --server 127.0.0.1:8081
+
+    # Alternatively, configure the server using an environment variable
+    export MEDUSA_SERVER=127.0.0.1:8081
+    medusa run tests/robot/test.robot
     medusa lock device1 device2
-    medusa lock dynamic:deviceGroup=device1,device2
-    medusa lock device1 dynamic:deviceGroup=device2,device3
-
-  The command remains active while the lock is held and sends periodic
-  keepalive requests to the server. Press Ctrl+C to release the locks.
-"""
-
-HELP_FREE = """Free:
-  Release dependencies belonging to a lock session or release all locks.
-
-  Usage:
     medusa free UUID
-
-  UUID is the session ID as shown in the medusa status command.
-
-  Example:
-    medusa free 123e4567-e89b-12d3-a456-426614174000
+    medusa status
 """
 
 
@@ -175,10 +201,8 @@ def main() -> None:
                 print(HELP_TIMEOUT)
             elif arguments["filter"]:
                 print(HELP_FILTER)
-            elif arguments["lock"]:
-                print(HELP_LOCK)
-            elif arguments["free"]:
-                print(HELP_FREE)
+            elif arguments["server"]:
+                print(HELP_SERVER)
             else:
                 print(HELP)
         elif arguments["version"]:
