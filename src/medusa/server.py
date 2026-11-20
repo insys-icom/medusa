@@ -597,13 +597,14 @@ def start_server(host: str = "127.0.0.1", port: str = "8081"):
 
 
 from urllib.parse import urlsplit
+
 from .constants import DEFAULT_SERVER_URL
 
 
 def normalize_server_url(server: str) -> str:
     """Normalize a server address by adding the scheme and default port."""
 
-    if not server.startswith(("http://")):
+    if not server.startswith("http://"):
         server = f"http://{server}"
 
     parsed = urlsplit(server)
