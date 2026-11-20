@@ -5,8 +5,9 @@ from typing import TYPE_CHECKING
 
 from docopt import docopt  # type: ignore
 
-from .constants import OUTPUTDIR, REPO_LINK, T_HARD, T_KILL
+from .constants import DEFAULT_SERVER_URL, OUTPUTDIR, REPO_LINK, T_HARD, T_KILL
 from .errors import MedusaError
+from .server import normalize_server_url
 from .utils import LOGGER
 
 if TYPE_CHECKING:
@@ -15,21 +16,18 @@ if TYPE_CHECKING:
     from .data import Data
     from .settings import Settings
 
-# TODO(SZI): add server ADDRESS/PORT to run, lock, free, status commands
-# TODO(SZI): also allow using environment variable eg. MEDUSA_SERVER for server
-#            with run, lock, free, status commands
 # TODO(SZI): remove medusa help status command
 # TODO(SZI): consolidate medusa help lock|free, turn it into general help text
 #            about server|lock|free|status usage and how that works
 HELP = f"""Medusa: Run Robot Framework suites with depdendency-aware parallelization
 
 Usage:
-  medusa run [-v] [-d OUTPUTDIR] [-f FILTER]... [-t TIMEOUT] [--] ROBOTARGS...
+  medusa run [-v] [-d OUTPUTDIR] [-f FILTER]... [-t TIMEOUT] [--server SERVER] [--] ROBOTARGS...
   medusa stats [-v] [-f FILTER]... [-s SELECTION] [--] ROBOTARGS...
   medusa server [--host HOST] [--port PORT]
-  medusa lock DEVICES...
-  medusa free UUID
-  medusa status
+  medusa lock DEVICES... [--server SERVER]
+  medusa free UUID [--server SERVER]
+  medusa status [--server SERVER]
   medusa help [filter|timeout|lock|free|status]
   medusa version
 
@@ -68,7 +66,8 @@ Options:
                             detailed description.
   -v --verbose              Enable debug logging.
   --host HOST               Address for the Medusa lock server. [default: 127.0.0.1]
-  --port PORT               Port for the Medusa lock server. [default: 8080]
+  --port PORT               Port for the Medusa lock server. [default: 8081]
+  --server SERVER           Adress of the Medusa lock server (HOST[:PORT]).
 
 Medusa is open source software licensed under the Apache License, Version 2.0.
 Source code and license text can be viewed at:
@@ -189,15 +188,30 @@ def main() -> None:
         elif arguments["lock"]:
             from .cli import lock_dependencies
 
-            lock_dependencies(arguments["DEVICES"])
+            server_url = normalize_server_url(
+                arguments["--server"]
+                or os.environ.get("MEDUSA_SERVER")
+                or DEFAULT_SERVER_URL
+            )
+            lock_dependencies(arguments["DEVICES"], server_url)
         elif arguments["free"]:
             from .cli import free
 
-            free(arguments["UUID"])
+            server_url = normalize_server_url(
+                arguments["--server"]
+                or os.environ.get("MEDUSA_SERVER")
+                or DEFAULT_SERVER_URL
+            )
+            free(arguments["UUID"], server_url)
         elif arguments["status"]:
             from .cli import show_status
 
-            show_status()
+            server_url = normalize_server_url(
+                arguments["--server"]
+                or os.environ.get("MEDUSA_SERVER")
+                or DEFAULT_SERVER_URL
+            )
+            show_status(server_url)
         elif arguments["server"]:
             from .server import start_server
 
@@ -213,13 +227,14 @@ def main() -> None:
             outputdir = Path(arguments["--outputdir"])
             robotargs = arguments["ROBOTARGS"]
             timeout = Timeout.from_argstr(arguments["--timeout"])
+            server = arguments["--server"] or os.environ.get("MEDUSA_SERVER")
             settings = Settings(
                 filters,
                 log_level,
                 outputdir,
                 robotargs,
                 timeout,
-                server_url=os.environ.get("MEDUSA_SERVER"),
+                server_url=(normalize_server_url(server) if server else None),
             )
 
             if arguments["run"]:

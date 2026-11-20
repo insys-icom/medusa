@@ -1,20 +1,15 @@
-import os
 import time
 from datetime import datetime
 from typing import Any
 
 import requests
 
-from .constants import DEFAULT_SERVER_URL
 
-SERVER_URL = os.environ.get("MEDUSA_SERVER") or f"http://{DEFAULT_SERVER_URL}"
-
-
-def show_status():
+def show_status(server_url: str) -> None:
     """Send status-request and print current server status"""
 
     try:
-        response = requests.get(f"{SERVER_URL}/status", timeout=5)
+        response = requests.get(f"{server_url}/status", timeout=5)
     except requests.RequestException as exc:
         print(f"Status request failed: {exc}")
         return
@@ -32,11 +27,11 @@ def show_status():
     _print_status(data)
 
 
-def lock_dependencies(dependencies: list[str]) -> None:
+def lock_dependencies(dependencies: list[str], server_url: str) -> None:
     """Lock the specified dependencies and maintain the session alive until interrupted."""
 
     static_deps, dynamic_deps = _parse_dependencies(dependencies)
-    session_id = _send_lock(static_deps, dynamic_deps)
+    session_id = _send_lock(static_deps, dynamic_deps, server_url)
 
     if not session_id:
         return
@@ -44,11 +39,11 @@ def lock_dependencies(dependencies: list[str]) -> None:
     print(f"Session ID: {session_id}")
 
     try:
-        _keepalive(session_id)
+        _keepalive(session_id, server_url)
     except KeyboardInterrupt:
         print("\nLock session interrupted.")
 
-        if free(session_id):
+        if free(session_id, server_url):
             print(f"Session '{session_id}' released.")
         else:
             print(
@@ -56,13 +51,13 @@ def lock_dependencies(dependencies: list[str]) -> None:
             )
 
 
-def free(session_id: str) -> bool:
+def free(session_id: str, server_url: str) -> bool:
     """Free the specified devices of a session by sending a release request to the server."""
 
     payload = {"session_id": session_id}
 
     try:
-        response = requests.post(f"{SERVER_URL}/free", json=payload, timeout=5)
+        response = requests.post(f"{server_url}/free", json=payload, timeout=5)
     except requests.RequestException as exc:
         print(f"Failed to contact server: {exc}")
         return False
@@ -133,7 +128,7 @@ def _parse_dependencies(
 
 
 def _send_lock(
-    static_deps: list[str], dynamic_deps: dict[str, list[str]]
+    static_deps: list[str], dynamic_deps: dict[str, list[str]], server_url: str
 ) -> str | None:
     """Send lock-request to server and returns the session_id"""
 
@@ -145,7 +140,7 @@ def _send_lock(
     }
 
     try:
-        response = requests.post(f"{SERVER_URL}/lock", json=payload, timeout=5)
+        response = requests.post(f"{server_url}/lock", json=payload, timeout=5)
     except requests.RequestException as exc:
         print(f"Failed to contact lock server: {exc}")
         return None
@@ -170,7 +165,7 @@ def _send_lock(
     return session_id
 
 
-def _keepalive(session_id: str) -> None:
+def _keepalive(session_id: str, server_url: str) -> None:
     """Keep the session alive on the server until it is gone or a request fails."""
 
     payload = {"session_id": session_id}
@@ -180,7 +175,7 @@ def _keepalive(session_id: str) -> None:
 
         try:
             response = requests.post(
-                f"{SERVER_URL}/alive",
+                f"{server_url}/alive",
                 json=payload,
                 timeout=5,
             )

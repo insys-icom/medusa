@@ -592,3 +592,26 @@ def start_server(host: str = "127.0.0.1", port: str = "8081"):
 
     print(f"Medusa lock-server auf http://{host}:{port_number} ...")
     LockServer(host, port_number).run()
+
+from urllib.parse import urlsplit
+from .constants import DEFAULT_SERVER_URL
+
+def normalize_server_url(server: str) -> str:
+    """Normalize a server address by adding the scheme and default port."""
+
+    if not server.startswith(("http://")):
+        server = f"http://{server}"
+
+    parsed = urlsplit(server)
+
+    if not parsed.hostname:
+        raise ValueError(f"Invalid server address: {server}")
+
+    if parsed.port is None:
+        host = parsed.hostname
+        if ":" in host:
+            host = f"[{host}]"
+
+        server = f"{parsed.scheme}://{host}:{DEFAULT_SERVER_URL.rsplit(':', 1)[-1]}"
+
+    return server.rstrip("/")
