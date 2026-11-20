@@ -36,11 +36,6 @@ class DepManager(ABC):
     def free(self, suite: "Suite", devices: set[str] | None = None) -> None:
         """Release the dependencies assigned to a suite."""
 
-    # TODO(SZI): Wie unterscheidet sich das von free()? Bitte mir einmal
-    # erklären :)
-    def finish(self, suite: "Suite") -> None:
-        """Finish dependency management for a completed suite."""
-
     def keepalive(self) -> None:
         """Keep active dependency locks alive if required."""
 
@@ -179,14 +174,16 @@ class ServerDepManager(DepManager):
             print(f"[SERVER-DEPMGR] No active sessions found for '{suite}'.")
             return
 
-        close_session = False
-
         devices_to_free = self._get_devices_to_free(
             session_id, session_devices, devices
         )
 
         if devices_to_free is None:
             return
+
+        # Close the session if no devices remain after freeing
+        remaining_devices = session_devices - devices_to_free
+        close_session = not remaining_devices
 
         payload = self._build_free_payload(
             session_id, devices_to_free, close_session
@@ -203,13 +200,17 @@ class ServerDepManager(DepManager):
             devices_to_free = set(session_devices)
             close_session = True
 
-        self._update_local_session(
-            suite, session_id, session_devices, devices_to_free, close_session
-        )
-
-        print(
-            f"[SERVER-DEPMGR] Released {sorted(devices_to_free)} for session '{session_id}'."
-        )
+        # Remove the session from local bookkeeping
+        if close_session:
+            with self._state_lock:
+                self.active_sessions.pop(suite, None)
+                print(
+                    f"[SERVER-DEPMGR] Released {sorted(devices_to_free)} for session '{session_id}'."
+                )
+                print(f"[SERVER-DEPMGR] Finished Session '{session_id}'.")
+        else:
+            with self._state_lock:
+                self.active_sessions[suite] = (session_id, remaining_devices)
 
     def keepalive(self) -> None:
         """Send keepalive-requests for all active sessions"""
@@ -223,31 +224,6 @@ class ServerDepManager(DepManager):
         # Send keepalive requests without holding the state lock
         for session_id in sessions:
             self._send_keepalive_request(session_id)
-
-    def finish(self, suite: "Suite") -> None:
-        """Release all devices and terminate the session"""
-
-        session_id, devices = self._get_session_data(suite)
-
-        if session_id is None:
-            return
-
-        payload = self._build_free_payload(
-            session_id, devices, close_session=True
-        )
-
-        response = self._send_free_request(payload)
-
-        if response is None:
-            return
-
-        # Remove the session from local bookkeeping
-        with self._state_lock:
-            self.active_sessions.pop(suite, None)
-
-        print(
-            f"[SERVER-DEPMGR] Finished session {session_id} with devices {sorted(devices)}"
-        )
 
     def _get_session_data(self, suite: "Suite") -> tuple[str | None, set[str]]:
         """Get the existing session_id and its assigned devices"""
