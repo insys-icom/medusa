@@ -31,57 +31,6 @@ def show_status(server_url: str) -> None:
     _print_status(data)
 
 
-def lock_dependencies(dependencies: list[str], server_url: str) -> None:
-    """Lock the specified dependencies and maintain the session alive until interrupted."""
-
-    static_deps, dynamic_deps = _parse_dependencies(dependencies)
-    session_id = _send_lock(static_deps, dynamic_deps, server_url)
-
-    if not session_id:
-        return
-
-    LOGGER.info(f"[CLI] Session ID: {session_id}")
-    print(f"Session ID: {session_id}")
-
-    try:
-        _keepalive(session_id, server_url)
-    except KeyboardInterrupt:
-        LOGGER.info("[CLI] Lock session interrupted.")
-
-        if free(session_id, server_url):
-            LOGGER.info(f"[CLI] Session '{session_id}' released.")
-            print(f"Session '{session_id}' released.")
-        else:
-            LOGGER.warning(
-                f"[CLI] Could not release session '{session_id}'. The server will reclaim it after timeout."
-            )
-
-
-def free(session_id: str, server_url: str) -> bool:
-    """Free the specified devices of a session by sending a release request to the server.
-    Return True if the session was successfully released, False otherwise.
-    """
-
-    payload = {"session_id": session_id}
-
-    try:
-        response = requests.post(f"{server_url}/free", json=payload, timeout=5)
-    except requests.RequestException as exc:
-        LOGGER.error(f"[CLI-FREE] Failed to contact server: {exc}")
-        return False
-
-    if response.status_code != 200:
-        LOGGER.error(
-            f"[CLI] Free request failed: {response.status_code} {response.text}"
-        )
-        return False
-
-    result = response.json()
-    LOGGER.info(f"[CLI] Freed dependencies: {result.get('devices', [])}")
-    print(f"Freed dependencies: {result.get('devices', [])}")
-    return True
-
-
 def _print_status(data: dict):
     """Print active sessions and their locked devices."""
 
@@ -117,6 +66,32 @@ def _print_status(data: dict):
 def _format_datetime(value: str) -> str:
     """Format an ISO-8601 datetime as local time."""
     return datetime.fromisoformat(value).astimezone().strftime("%H:%M:%S")
+
+
+def lock_dependencies(dependencies: list[str], server_url: str) -> None:
+    """Lock the specified dependencies and maintain the session alive until interrupted."""
+
+    static_deps, dynamic_deps = _parse_dependencies(dependencies)
+    session_id = _send_lock(static_deps, dynamic_deps, server_url)
+
+    if not session_id:
+        return
+
+    LOGGER.info(f"[CLI] Session ID: {session_id}")
+    print(f"Session ID: {session_id}")
+
+    try:
+        _keepalive(session_id, server_url)
+    except KeyboardInterrupt:
+        LOGGER.info("[CLI] Lock session interrupted.")
+
+        if free(session_id, server_url):
+            LOGGER.info(f"[CLI] Session '{session_id}' released.")
+            print(f"Session '{session_id}' released.")
+        else:
+            LOGGER.warning(
+                f"[CLI] Could not release session '{session_id}'. The server will reclaim it after timeout."
+            )
 
 
 def _parse_dependencies(
@@ -216,3 +191,28 @@ def _keepalive(session_id: str, server_url: str) -> None:
                 f"[CLI] Keepalive rejected: {response.status_code} {response.text}"
             )
             return
+
+
+def free(session_id: str, server_url: str) -> bool:
+    """Free the specified devices of a session by sending a release request to the server.
+    Return True if the session was successfully released, False otherwise.
+    """
+
+    payload = {"session_id": session_id}
+
+    try:
+        response = requests.post(f"{server_url}/free", json=payload, timeout=5)
+    except requests.RequestException as exc:
+        LOGGER.error(f"[CLI-FREE] Failed to contact server: {exc}")
+        return False
+
+    if response.status_code != 200:
+        LOGGER.error(
+            f"[CLI] Free request failed: {response.status_code} {response.text}"
+        )
+        return False
+
+    result = response.json()
+    LOGGER.info(f"[CLI] Freed dependencies: {result.get('devices', [])}")
+    print(f"Freed dependencies: {result.get('devices', [])}")
+    return True
