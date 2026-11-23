@@ -151,11 +151,11 @@ def _send_lock(
     try:
         response = requests.post(f"{server_url}/lock", json=payload, timeout=5)
     except requests.RequestException as exc:
-        print(f"Failed to contact lock server: {exc}")
+        LOGGER.error(f"Failed to contact lock server: {exc}")
         return None
 
     if response.status_code != 200:
-        print(f"Lock request failed: {response.status_code} {response.text}")
+        LOGGER.error(f"Lock request failed: {response.status_code} {response.text}")
         return None
 
     data = response.json()
@@ -164,7 +164,7 @@ def _send_lock(
     dynamic_locked = data.get("deps_assigned", [])
 
     if not isinstance(session_id, str) or not session_id:
-        print("Lock request failed: Server did not return a session ID.")
+        LOGGER.error("Lock request failed: Server did not return a session ID.")
         return None
 
     print("Locked dependencies:")
@@ -189,15 +189,15 @@ def _keepalive(session_id: str, server_url: str) -> None:
                 timeout=5,
             )
         except requests.RequestException as exc:
-            print(f"Keepalive failed: {exc}")
+            LOGGER.error(f"Keepalive failed: {exc}")
             return
 
         if response.status_code == 404:
-            print(f"Session {session_id} no longer exists on the server.")
+            LOGGER.error(f"Session {session_id} no longer exists on the server.")
             return
 
         if response.status_code != 200:
-            print(
+            LOGGER.error(
                 f"Keepalive rejected: {response.status_code} {response.text}"
             )
             return
