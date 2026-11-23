@@ -166,7 +166,9 @@ class DepLockManager:
         busy_static = static_deps & busy_deps
 
         if busy_static:
-            LOGGER.error(f"[SERVER] Static dependencies are busy: {sorted(busy_static)}")
+            LOGGER.error(
+                f"[SERVER] Static dependencies are busy: {sorted(busy_static)}"
+            )
             return {
                 "status": "unavailable",
                 "message": f"Static dependencies are busy: {sorted(busy_static)}",
@@ -182,7 +184,9 @@ class DepLockManager:
         assigned_dynamic = resolve_dynamic_dependencies(available_options)
 
         if assigned_dynamic is None:
-            LOGGER.error("[SERVER] No distinct set of devices satisfies all dynamic dependencies.")
+            LOGGER.error(
+                "[SERVER] No distinct set of devices satisfies all dynamic dependencies."
+            )
             return {
                 "status": "unavailable",
                 "message": "No distinct set of devices satisfies all dynamic dependencies.",
@@ -278,7 +282,9 @@ class LockServer:
             return web.json_response(lock_data, status=409)
 
         if lock_data["status"] == "error":
-            LOGGER.error("[SERVER] Error occurred while resolving and assigning dependencies.")
+            LOGGER.error(
+                "[SERVER] Error occurred while resolving and assigning dependencies."
+            )
             return web.json_response(lock_data, status=404)
 
         # 6. Lock successfully acquired
@@ -356,11 +362,15 @@ class LockServer:
 
         # 3. Return result
         if result["status"] == "error":
-            LOGGER.error(f"[SERVER] Failed to release session '{session_id}': {result.get('message', '')}")
+            LOGGER.error(
+                f"[SERVER] Failed to release session '{session_id}': {result.get('message', '')}"
+            )
             return web.json_response(result, status=404)
 
         if result["status"] == "rejected":
-            LOGGER.error(f"[SERVER] Release request rejected for session '{session_id}': {result.get('message', '')}")
+            LOGGER.error(
+                f"[SERVER] Release request rejected for session '{session_id}': {result.get('message', '')}"
+            )
             return web.json_response(result, status=409)
 
         return web.json_response(result, status=200)

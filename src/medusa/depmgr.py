@@ -56,7 +56,9 @@ class LocalDepManager(DepManager):
         assignments = resolve_dynamic_dependencies(available_options)
 
         if assignments is None:
-            LOGGER.error(f"[LOCAL-DEPMGR] Failed to resolve dynamic dependencies for suite '{suite.name}'")
+            LOGGER.error(
+                f"[LOCAL-DEPMGR] Failed to resolve dynamic dependencies for suite '{suite.full_name}'"
+            )
             return False
 
         for name, value in assignments.items():
@@ -114,14 +116,18 @@ class ServerDepManager(DepManager):
         response = self._send_lock_request(payload, session_id)
 
         if response is None:
-            LOGGER.error(f"[SERVER-DEPMGR] Failed to send lock request for suite '{suite.name}'")
+            LOGGER.error(
+                f"[SERVER-DEPMGR] Failed to send lock request for suite '{suite.full_name}'"
+            )
             return False
 
         # 4. Extract the session_id from servers lock confirmation
         session_data = self._extract_session_id(response, session_id)
 
         if session_data is None:
-            LOGGER.error(f"[SERVER-DEPMGR] Failed to extract session ID from lock confirmation for suite '{suite.name}'")
+            LOGGER.error(
+                f"[SERVER-DEPMGR] Failed to extract session ID from lock confirmation for suite '{suite.full_name}'"
+            )
             return False
 
         data, session_id = session_data
@@ -166,7 +172,9 @@ class ServerDepManager(DepManager):
         session_id, session_devices = self._get_session_data(suite)
 
         if session_id is None:
-            LOGGER.warning(f"[SERVER-DEPMGR] No active sessions found for '{suite}'.")
+            LOGGER.warning(
+                f"[SERVER-DEPMGR] No active sessions found for '{suite.full_name}'."
+            )
             return
 
         devices_to_free = self._get_devices_to_free(
@@ -282,7 +290,7 @@ class ServerDepManager(DepManager):
         # Server immediately rejects request if the required dependencies are unavailable
         if response.status_code == 409:
             LOGGER.warning(
-                f"[SERVER-DEPMGR] Lock request rejected: dependencies unavailable."
+                "[SERVER-DEPMGR] Lock request rejected: dependencies unavailable."
             )
             return None
 
@@ -343,7 +351,7 @@ class ServerDepManager(DepManager):
             )
             return False
 
-        LOGGER.info(
+        LOGGER.debug(
             f"[SERVER-DEPMGR] Keepalive request sent for session '{session_id}'."
         )
 

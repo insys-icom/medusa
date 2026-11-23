@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 import requests
+
 from .utils import LOGGER
 
 
@@ -16,7 +17,9 @@ def show_status(server_url: str) -> None:
         return
 
     if response.status_code != 200:
-        LOGGER.error(f"[CLI] Status rejected: {response.status_code} {response.text}")
+        LOGGER.error(
+            f"[CLI] Status rejected: {response.status_code} {response.text}"
+        )
         return
 
     try:
@@ -49,7 +52,9 @@ def lock_dependencies(dependencies: list[str], server_url: str) -> None:
             LOGGER.info(f"[CLI] Session '{session_id}' released.")
             print(f"Session '{session_id}' released.")
         else:
-            LOGGER.warning(f"[CLI] Could not release session '{session_id}'. The server will reclaim it after timeout.")
+            LOGGER.warning(
+                f"[CLI] Could not release session '{session_id}'. The server will reclaim it after timeout."
+            )
 
 
 def free(session_id: str, server_url: str) -> bool:
@@ -64,7 +69,9 @@ def free(session_id: str, server_url: str) -> bool:
         return False
 
     if response.status_code != 200:
-        LOGGER.error(f"[CLI] Free request failed: {response.status_code} {response.text}")
+        LOGGER.error(
+            f"[CLI] Free request failed: {response.status_code} {response.text}"
+        )
         return False
 
     result = response.json()
