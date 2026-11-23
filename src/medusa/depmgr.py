@@ -15,6 +15,8 @@ if TYPE_CHECKING:
 
 class DepManager(ABC):
     def __init__(self, stage: "Stage") -> None:
+        """Initialize the dependency manager with the given stage."""
+
         all_deps: set[str] = set(stage.deps_static_cnt).union(
             stage.deps_dynamic_cnt
         )
@@ -35,6 +37,8 @@ class DepManager(ABC):
 # Local Dependency Manager for automatically medusa runs
 class LocalDepManager(DepManager):
     def __init__(self, stage: "Stage") -> None:
+        """Initialize the local dependency manager with the given stage."""
+
         super().__init__(stage)
         self.available = set(self.all)
         self.in_use: set[str] = set()
@@ -93,7 +97,7 @@ class LocalDepManager(DepManager):
         self.in_use.difference_update(deps_assigned)
 
 
-# Dependency Manager over a server to
+# Dependency Manager over a server
 class ServerDepManager(DepManager):
     def __init__(self, stage: "Stage", server_url: str) -> None:
         """Initialize the server dependency manager with the given stage and server URL."""
@@ -104,7 +108,9 @@ class ServerDepManager(DepManager):
         self.server_url = server_url
 
     def try_lock(self, suite: "Suite") -> bool:
-        """Ask server to lock & assign the suite's dependencies"""
+        """Ask server to lock & assign the suite's dependencies.
+        Returns true if the lock was successfully acquired and False otherwise.
+        """
 
         # 1. Get the existing session, if the suite already has one
         session_id, existing_devices = self._get_session_data(suite)
@@ -167,7 +173,7 @@ class ServerDepManager(DepManager):
         suite: "Suite",
         devices: set[str] | None = None,
     ) -> None:
-        """Release all or selected dependencies of a suite"""
+        """Release all or selected dependencies of a suite."""
 
         session_id, session_devices = self._get_session_data(suite)
 
@@ -215,7 +221,7 @@ class ServerDepManager(DepManager):
                 self.active_sessions[suite] = (session_id, remaining_devices)
 
     def keepalive(self) -> None:
-        """Send keepalive-requests for all active sessions"""
+        """Send keepalive-requests for all active sessions."""
 
         # Take a snapshot of the active session_ids
         with self._state_lock:
@@ -228,7 +234,7 @@ class ServerDepManager(DepManager):
             self._send_keepalive_request(session_id)
 
     def _get_session_data(self, suite: "Suite") -> tuple[str | None, set[str]]:
-        """Get the existing session_id and its assigned devices"""
+        """Get the existing session_id and its assigned devices and return it as a tuple."""
 
         with self._state_lock:
             session_data = self.active_sessions.get(suite)
@@ -241,7 +247,7 @@ class ServerDepManager(DepManager):
     def _build_lock_payload(
         self, suite: "Suite", session_id: str | None
     ) -> dict[str, Any]:
-        """Build the payload for a server lock request"""
+        """Build the payload for a server lock request and return it."""
 
         payload: dict[str, Any] = {
             "deps_static": sorted(suite.deps_static),
@@ -262,7 +268,7 @@ class ServerDepManager(DepManager):
         devices_to_free: set[str],
         close_session: bool,
     ) -> dict[str, Any]:
-        """Build the payload for a server free request"""
+        """Build the payload for a server free request and return it."""
 
         payload: dict[str, Any] = {"session_id": session_id}
 
@@ -274,7 +280,9 @@ class ServerDepManager(DepManager):
     def _send_lock_request(
         self, payload: dict[str, Any], session_id: str | None
     ) -> requests.Response | None:
-        """Send a lock request and handle unsuccessful HTTP responses"""
+        """Send a lock request and handle unsuccessful HTTP responses.
+        Return the response if successful, None otherwise.
+        """
 
         try:
             response = requests.post(
@@ -312,7 +320,9 @@ class ServerDepManager(DepManager):
     def _send_free_request(
         self, payload: dict[str, Any]
     ) -> requests.Response | None:
-        """Send free request to the lock server"""
+        """Send free request to the lock server.
+        Return the response if successful, None otherwise.
+        """
 
         try:
             response = requests.post(
@@ -331,7 +341,9 @@ class ServerDepManager(DepManager):
         return response
 
     def _send_keepalive_request(self, session_id: str) -> bool:
-        """Send a keepalive request for one session"""
+        """Send a keepalive request for one session.
+        Return True if successful, False otherwise.
+        """
 
         payload = {"session_id": session_id}
 
@@ -360,7 +372,9 @@ class ServerDepManager(DepManager):
     def _extract_session_id(
         self, response: requests.Response, session_id: str | None
     ) -> tuple[dict[str, Any], str] | None:
-        """Extract and validate the session_id from the lock confirmation"""
+        """Extract and validate the session_id from the lock confirmation.
+        Return a tuple of the response data and the session_id if valid, None otherwise.
+        """
 
         try:
             data = response.json()
@@ -389,7 +403,9 @@ class ServerDepManager(DepManager):
     def _validate_dynamic_assignments(
         self, assigned_dynamic: dict[str, Any], suite: "Suite"
     ) -> None:
-        """Validate the servers dynamic dependency assignments"""
+        """Validate the servers dynamic dependency assignments.
+        Raise a ValueError if the assignments are invalid.
+        """
 
         # Ensure that the server assigned every requested dynamic dependency
         if set(assigned_dynamic) != set(suite.deps_dynamic):
@@ -419,7 +435,10 @@ class ServerDepManager(DepManager):
         suite: "Suite",
         existing_devices: set[str],
     ) -> tuple[dict[str, str], set[str]]:
-        """Validate the servers lock confirmation"""
+        """Validate the servers lock confirmation.
+        Raise a ValueError if the confirmation is invalid.
+        Return a tuple containing the assigned dynamic dependencies and the concrete devices.
+        """
 
         if data.get("status") != "locked":
             raise ValueError(f"Unexpected lock response: {data}")
@@ -460,7 +479,7 @@ class ServerDepManager(DepManager):
         return assigned_dynamic, concrete_devices
 
     def _release_invalid_session(self, session_id: str) -> None:
-        """Release a newly created session after an invalid confirmation"""
+        """Release a newly created session after an invalid confirmation."""
 
         payload = self._build_free_payload(
             session_id, set(), close_session=True
@@ -473,7 +492,7 @@ class ServerDepManager(DepManager):
         session_devices: set[str],
         devices: set[str] | None,
     ) -> set[str] | None:
-        """Determie which devices can be released"""
+        """Determine which devices can be released."""
 
         if devices is None:
             return set(session_devices)
@@ -502,7 +521,7 @@ class ServerDepManager(DepManager):
         devices_to_free: set[str],
         close_session: bool,
     ) -> None:
-        """Update local session bookkeeping after freeing devices"""
+        """Update local session bookkeeping after freeing devices."""
 
         remaining_devices = session_devices - devices_to_free
 
@@ -514,7 +533,10 @@ class ServerDepManager(DepManager):
 
 
 def get_dep_manager(stage: "Stage", settings: "Settings") -> DepManager:
-    """Create the appropriate dependency manager based on the settings."""
+    """Create the appropriate dependency manager based on the settings.
+    Return a ServerDepManager if a server URL is specified in the settings,
+    otherwise return a LocalDepManager.
+    """
 
     if settings.server_url:
         return ServerDepManager(stage, settings.server_url)

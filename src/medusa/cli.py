@@ -8,7 +8,7 @@ from .utils import LOGGER
 
 
 def show_status(server_url: str) -> None:
-    """Send status-request and print current server status"""
+    """Send status-request and print current server status."""
 
     try:
         response = requests.get(f"{server_url}/status", timeout=5)
@@ -58,7 +58,9 @@ def lock_dependencies(dependencies: list[str], server_url: str) -> None:
 
 
 def free(session_id: str, server_url: str) -> bool:
-    """Free the specified devices of a session by sending a release request to the server."""
+    """Free the specified devices of a session by sending a release request to the server.
+    Return True if the session was successfully released, False otherwise.
+    """
 
     payload = {"session_id": session_id}
 
@@ -81,7 +83,7 @@ def free(session_id: str, server_url: str) -> bool:
 
 
 def _print_status(data: dict):
-    """Print active sessions and their locked devices"""
+    """Print active sessions and their locked devices."""
 
     sessions = data.get("sessions", [])
 
@@ -120,7 +122,9 @@ def _format_datetime(value: str) -> str:
 def _parse_dependencies(
     dependencies: list[str],
 ) -> tuple[list[str], dict[str, list[str]]]:
-    """Parse dependency-arguments into static & dynamic dependencies"""
+    """Parse dependency-arguments into static & dynamic dependencies.
+    Return a tuple containing a list of static dependencies and a dictionary of dynamic dependencies.
+    """
 
     static_deps = []
     dynamic_deps = {}
@@ -139,7 +143,10 @@ def _parse_dependencies(
 def _send_lock(
     static_deps: list[str], dynamic_deps: dict[str, list[str]], server_url: str
 ) -> str | None:
-    """Send lock-request to server and returns the session_id"""
+    """Send lock-request to server and returns the session_id.
+    Return None if the request fails or the server does not provide a session ID.
+    Else return the session ID.
+    """
 
     payload: dict[str, Any] = {
         "deps_static": static_deps,
@@ -155,7 +162,9 @@ def _send_lock(
         return None
 
     if response.status_code != 200:
-        LOGGER.error(f"[CLI] Lock request failed: {response.status_code} {response.text}")
+        LOGGER.error(
+            f"[CLI] Lock request failed: {response.status_code} {response.text}"
+        )
         return None
 
     data = response.json()
@@ -164,7 +173,9 @@ def _send_lock(
     dynamic_locked = data.get("deps_assigned", [])
 
     if not isinstance(session_id, str) or not session_id:
-        LOGGER.error("[CLI] Lock request failed: Server did not return a session ID.")
+        LOGGER.error(
+            "[CLI] Lock request failed: Server did not return a session ID."
+        )
         return None
 
     print("Locked dependencies:")
@@ -175,7 +186,9 @@ def _send_lock(
 
 
 def _keepalive(session_id: str, server_url: str) -> None:
-    """Keep the session alive on the server until it is gone or a request fails."""
+    """Keep the session alive on the server until it is gone or a request fails.
+    Return None when the session is no longer active or a request fails.
+    """
 
     payload = {"session_id": session_id}
 
@@ -193,7 +206,9 @@ def _keepalive(session_id: str, server_url: str) -> None:
             return
 
         if response.status_code == 404:
-            LOGGER.error(f"[CLI] Session {session_id} no longer exists on the server.")
+            LOGGER.error(
+                f"[CLI] Session {session_id} no longer exists on the server."
+            )
             return
 
         if response.status_code != 200:

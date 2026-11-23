@@ -11,6 +11,14 @@ from .utils import LOGGER
 
 @dataclass(eq=False)
 class Session:
+    """Represents a lock session for a set of devices.
+
+    uuid is a string representing the session ID.
+    devices is the set of locked devices.
+    since is the timestamp when the session was created.
+    last_alive is the timestamp of the last keepalive.
+    """
+
     uuid: str
     devices: set[str] = field(default_factory=set)
     since: datetime = field(default_factory=lambda: datetime.now(UTC))
@@ -43,7 +51,7 @@ class DepLockManager:
         self.active_locks: dict[str, str] = {}
 
     def _get_expired_sessions(self, timeout_seconds: int) -> list[Session]:
-        """Return sessions whose keepalive timeout has expired"""
+        """Returns a list of sessions whose keepalive timeout has expired."""
 
         current_time = datetime.now(UTC)
 
@@ -55,7 +63,7 @@ class DepLockManager:
         ]
 
     def _reclaim_session(self, session: Session) -> None:
-        """Release all devices and remove an expired session"""
+        """Release all devices and remove an expired session."""
 
         released_devices = sorted(session.devices)
 
@@ -67,7 +75,7 @@ class DepLockManager:
         )
 
     def _check_and_reclaim_expired_locks(self, timeout_seconds=30):
-        """Cleanup expired sessions and their locks"""
+        """Cleanup expired sessions and their locks."""
 
         expired_sessions = self._get_expired_sessions(timeout_seconds)
 
@@ -92,7 +100,7 @@ class DepLockManager:
         session_id: str,
         devices: set[str] | None = None,
     ) -> dict:
-        """Find a session and release all or selected devices"""
+        """Find a session and release all or selected devices."""
 
         # 1. Find session
         session = self.sessions.get(session_id)
@@ -141,7 +149,7 @@ class DepLockManager:
         static_deps: set[str],
         dynamic_raw: dict[str, set[str]],
     ) -> dict:
-        """Resolve dependencies and create a session if all devices are available"""
+        """Resolve dependencies and create a session if all devices are available."""
 
         LOGGER.info(
             f"[SERVER] Lock request received: session={session_id} static={sorted(static_deps)}, dynamic={dynamic_raw}"
@@ -221,6 +229,8 @@ class DepLockManager:
 
 class LockServer:
     def __init__(self, host: str = "127.0.0.1", port: int = 8081):
+        """Initialize the lock server with the specified host and port and prepare the dependency lock manager."""
+
         self.pool = DepLockManager()
         self.host = host
         self.port = port
@@ -245,7 +255,7 @@ class LockServer:
         return web.run_app(app, host=self.host, port=self.port)
 
     async def _handle_lock(self, request):
-        """Function for locking dependencies according to "all or nothing"-principle"""
+        """Function for locking dependencies according to "all or nothing"-principle."""
 
         # 1. Payload parsing & validation
         parsed = await self._parse_lock_request(request)
@@ -306,7 +316,7 @@ class LockServer:
         )
 
     async def _handle_alive(self, request):
-        """Update the last_alive timestamp of an existing session"""
+        """Update the last_alive timestamp of an existing session."""
 
         session_id = await self._parse_alive_request(request)
 
@@ -345,7 +355,7 @@ class LockServer:
         )
 
     async def _handle_free(self, request):
-        """Release all or selected devices belonging to a session"""
+        """Release all or selected devices belonging to a session."""
 
         # 1. Payload parsing & validation
         parsed = await self._parse_free_request(request)
@@ -376,7 +386,7 @@ class LockServer:
         return web.json_response(result, status=200)
 
     async def _handle_status(self, request):
-        """Shows all active sessions and their locked devices"""
+        """Shows all active sessions and their locked devices."""
 
         LOGGER.debug("[SERVER] Global status dashboard request received.")
 
@@ -396,7 +406,7 @@ class LockServer:
         return web.json_response({"sessions": sessions})
 
     async def _parse_lock_request(self, request_data):
-        """Parse and validate a lock request containing static and dynamic dependencies"""
+        """Parse and validate a lock request containing static and dynamic dependencies."""
 
         try:
             body = await request_data.json()
@@ -495,7 +505,7 @@ class LockServer:
         return static_deps, dynamic_options
 
     async def _parse_alive_request(self, request):
-        """Parse and validate a keepalive request"""
+        """Parse and validate a keepalive request."""
 
         try:
             body = await request.json()
@@ -529,11 +539,11 @@ class LockServer:
 
     @staticmethod
     def _format_datetime(value: datetime) -> str:
-        """Format a datetime in the local timezone"""
+        """Format a datetime in the local timezone."""
         return value.replace(microsecond=0).astimezone().isoformat()
 
     async def _parse_free_request(self, request):
-        """Parse and validate a session_id and optional devices from a free request"""
+        """Parse and validate a session_id and optional devices from a free request."""
 
         try:
             body = await request.json()
@@ -587,7 +597,7 @@ class LockServer:
         return session_id, devices
 
     async def _cleanup_loop(self):
-        """Clean up expired locks every 5 seconds"""
+        """Clean up expired locks every 5 seconds."""
 
         while True:
             async with self.pool.server_mutex:
@@ -596,12 +606,12 @@ class LockServer:
             await asyncio.sleep(5)
 
     async def _on_startup(self, app):
-        """Create cleanup-task when the application was started"""
+        """Create cleanup-task when the application was started."""
 
         app["cleanup_task"] = asyncio.create_task(self._cleanup_loop())
 
     async def _on_cleanup(self, app):
-        """Stop cleanup-task when application ends"""
+        """Stop cleanup-task when application ends."""
 
         app["cleanup_task"].cancel()
 
@@ -612,7 +622,7 @@ class LockServer:
 
 
 def start_server(host: str = "127.0.0.1", port: str = "8081"):
-    """Global entry point: Start the lock server"""
+    """Global entry point: Start the lock server."""
 
     try:
         port_number = int(port)
