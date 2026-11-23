@@ -22,7 +22,7 @@ HELP = f"""Medusa: Run Robot Framework suites with depdendency-aware paralleliza
 Usage:
   medusa run [-v] [-d OUTPUTDIR] [-f FILTER]... [-t TIMEOUT] [--server SERVER] [--] ROBOTARGS...
   medusa stats [-v] [-f FILTER]... [-s SELECTION] [--] ROBOTARGS...
-  medusa server [--host HOST] [--port PORT]
+  medusa server [-v] [--host HOST] [--port PORT]
   medusa lock DEVICES... [--server SERVER]
   medusa free UUID [--server SERVER]
   medusa status [--server SERVER]
@@ -128,7 +128,7 @@ HELP_SERVER = """Server:
   Manage dependencies across multiple Medusa instances using the lock server.
 
   Commands:
-    medusa server [--host HOST] [--port PORT]
+    medusa server [-v] [--host HOST] [--port PORT]
         Start the Medusa lock server.
 
     medusa run [--server SERVER] [--] ROBOTARGS...

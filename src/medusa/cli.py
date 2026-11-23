@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import Any
 
 import requests
+from .utils import LOGGER
 
 
 def show_status(server_url: str) -> None:
@@ -11,17 +12,17 @@ def show_status(server_url: str) -> None:
     try:
         response = requests.get(f"{server_url}/status", timeout=5)
     except requests.RequestException as exc:
-        print(f"Status request failed: {exc}")
+        LOGGER.error(f"[CLI]Status request failed: {exc}")
         return
 
     if response.status_code != 200:
-        print(f"Status rejected: {response.status_code} {response.text}")
+        LOGGER.error(f"[CLI] Status rejected: {response.status_code} {response.text}")
         return
 
     try:
         data = response.json()
     except ValueError:
-        print("Status request returned invalid JSON.")
+        LOGGER.warning("[CLI] Status request returned invalid JSON.")
         return
 
     _print_status(data)
@@ -36,19 +37,19 @@ def lock_dependencies(dependencies: list[str], server_url: str) -> None:
     if not session_id:
         return
 
+    LOGGER.info(f"[CLI] Session ID: {session_id}")
     print(f"Session ID: {session_id}")
 
     try:
         _keepalive(session_id, server_url)
     except KeyboardInterrupt:
-        print("\nLock session interrupted.")
+        LOGGER.info("[CLI] Lock session interrupted.")
 
         if free(session_id, server_url):
+            LOGGER.info(f"[CLI] Session '{session_id}' released.")
             print(f"Session '{session_id}' released.")
         else:
-            print(
-                f"Could not release session '{session_id}'. The server will reclaim it after timeout."
-            )
+            LOGGER.warning(f"[CLI] Could not release session '{session_id}'. The server will reclaim it after timeout.")
 
 
 def free(session_id: str, server_url: str) -> bool:
@@ -59,14 +60,15 @@ def free(session_id: str, server_url: str) -> bool:
     try:
         response = requests.post(f"{server_url}/free", json=payload, timeout=5)
     except requests.RequestException as exc:
-        print(f"Failed to contact server: {exc}")
+        LOGGER.error(f"[CLI-FREE] Failed to contact server: {exc}")
         return False
 
     if response.status_code != 200:
-        print(f"Free request failed: {response.status_code} {response.text}")
+        LOGGER.error(f"[CLI] Free request failed: {response.status_code} {response.text}")
         return False
 
     result = response.json()
+    LOGGER.info(f"[CLI] Freed dependencies: {result.get('devices', [])}")
     print(f"Freed dependencies: {result.get('devices', [])}")
     return True
 

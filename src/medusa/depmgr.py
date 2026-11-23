@@ -5,20 +5,12 @@ from typing import TYPE_CHECKING, Any
 import requests
 
 from .dependency_resolver import resolve_dynamic_dependencies
+from .utils import LOGGER
 
 if TYPE_CHECKING:
     from .data import Stage
     from .settings import Settings
     from .suite import Suite
-
-
-# TODO(SZI): Allgemein logging nicht mit print machen sondern mit der
-# `logging` library, siehe andere module - da kann man dann auch verschiedene
-# log-levels nutzen (info, warning, error) und es wird korrekt nach
-# stdout/stderr und datei geloggt.
-# print benutze ich nur für CLI meldungen, die nicht logmeldungen im
-# klassischen sinn sind sondern z.B. statusausgabe oder wichtige Schritte im
-# Ablauf. schau mal einfach wo ich print und wo ich logging benutze! :)
 
 
 class DepManager(ABC):
@@ -64,6 +56,7 @@ class LocalDepManager(DepManager):
         assignments = resolve_dynamic_dependencies(available_options)
 
         if assignments is None:
+            LOGGER.error(f"[LOCAL-DEPMGR] Failed to resolve dynamic dependencies for suite '{suite.name}'")
             return False
 
         for name, value in assignments.items():
@@ -121,12 +114,14 @@ class ServerDepManager(DepManager):
         response = self._send_lock_request(payload, session_id)
 
         if response is None:
+            LOGGER.error(f"[SERVER-DEPMGR] Failed to send lock request for suite '{suite.name}'")
             return False
 
         # 4. Extract the session_id from servers lock confirmation
         session_data = self._extract_session_id(response, session_id)
 
         if session_data is None:
+            LOGGER.error(f"[SERVER-DEPMGR] Failed to extract session ID from lock confirmation for suite '{suite.name}'")
             return False
 
         data, session_id = session_data
@@ -137,7 +132,7 @@ class ServerDepManager(DepManager):
                 self._validate_lock_confirmation(data, suite, existing_devices)
             )
         except (ValueError, TypeError) as exc:
-            print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
+            LOGGER.error(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
 
             # Release newly created session if confirmation is invalid
             if not existing_devices:
@@ -156,7 +151,7 @@ class ServerDepManager(DepManager):
         with self._state_lock:
             self.active_sessions[suite] = (session_id, concrete_devices)
 
-        print(
+        LOGGER.info(
             f"[SERVER-DEPMGR] Locked {sorted(concrete_devices)} for session '{session_id}'."
         )
         return True
@@ -171,7 +166,7 @@ class ServerDepManager(DepManager):
         session_id, session_devices = self._get_session_data(suite)
 
         if session_id is None:
-            print(f"[SERVER-DEPMGR] No active sessions found for '{suite}'.")
+            LOGGER.warning(f"[SERVER-DEPMGR] No active sessions found for '{suite}'.")
             return
 
         devices_to_free = self._get_devices_to_free(
@@ -204,10 +199,9 @@ class ServerDepManager(DepManager):
         if close_session:
             with self._state_lock:
                 self.active_sessions.pop(suite, None)
-                print(
-                    f"[SERVER-DEPMGR] Released {sorted(devices_to_free)} for session '{session_id}'."
+                LOGGER.info(
+                    f"[SERVER-DEPMGR] Released {sorted(devices_to_free)} and finished session '{session_id}'."
                 )
-                print(f"[SERVER-DEPMGR] Finished Session '{session_id}'.")
         else:
             with self._state_lock:
                 self.active_sessions[suite] = (session_id, remaining_devices)
@@ -278,27 +272,29 @@ class ServerDepManager(DepManager):
             response = requests.post(
                 f"{self.server_url}/lock", json=payload, timeout=5
             )
-            print(
-                f"[DEBUG] HTTP response received: {response.status_code}",
-                flush=True,
+            LOGGER.debug(
+                f"[SERVER-DEPMGR] HTTP response received: {response.status_code}"
             )
         except requests.RequestException as exc:
-            print(f"[SERVER-DEPMGR] Lock request failed: {exc}")
+            LOGGER.error(f"[SERVER-DEPMGR] Lock request failed: {exc}")
             return None
 
         # Server immediately rejects request if the required dependencies are unavailable
         if response.status_code == 409:
+            LOGGER.warning(
+                f"[SERVER-DEPMGR] Lock request rejected: dependencies unavailable."
+            )
             return None
 
         if response.status_code == 404 and session_id is not None:
-            print(
+            LOGGER.warning(
                 f"[SERVER-DEPMGR] Session '{session_id}' no longer exists on the server."
             )
             return None
 
         # Handle unexpected HTTP responses
         if response.status_code != 200:
-            print(
+            LOGGER.error(
                 f"[SERVER-DEPMGR] Lock request failed: {response.status_code} {response.text}"
             )
             return None
@@ -315,11 +311,11 @@ class ServerDepManager(DepManager):
                 f"{self.server_url}/free", json=payload, timeout=5
             )
         except requests.RequestException as exc:
-            print(f"[SERVER-DEPMGR] Failed to release session: {exc}")
+            LOGGER.error(f"[SERVER-DEPMGR] Failed to release session: {exc}")
             return None
 
         if response.status_code not in (200, 404):
-            print(
+            LOGGER.error(
                 f"[SERVER-DEPMGR] Server rejected free request: {response.status_code} {response.text}"
             )
             return None
@@ -336,18 +332,18 @@ class ServerDepManager(DepManager):
                 f"{self.server_url}/alive", json=payload, timeout=5
             )
         except requests.RequestException as exc:
-            print(
+            LOGGER.error(
                 f"[SERVER-DEPMGR] Keepalive request failed for session {session_id}: {exc}"
             )
             return False
 
         if response.status_code != 200:
-            print(
+            LOGGER.error(
                 f"[SERVER-DEPMGR] Keepalive request failed: {response.status_code} {response.text}"
             )
             return False
 
-        print(
+        LOGGER.info(
             f"[SERVER-DEPMGR] Keepalive request sent for session '{session_id}'."
         )
 
@@ -379,7 +375,7 @@ class ServerDepManager(DepManager):
             return data, returned_session_id
 
         except (ValueError, TypeError) as exc:
-            print(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
+            LOGGER.error(f"[SERVER-DEPMGR] Invalid lock confirmation: {exc}")
             return None
 
     def _validate_dynamic_assignments(
@@ -477,13 +473,13 @@ class ServerDepManager(DepManager):
         devices_to_free = set(devices)
 
         if not devices_to_free:
-            print(
+            LOGGER.warning(
                 f"[SERVER-DEPMGR] No devices to release for session '{session_id}'."
             )
             return None
 
         if not devices_to_free.issubset(session_devices):
-            print(
+            LOGGER.error(
                 f"[SERVER-DEPMGR] Cannot release devices not owned by session '{session_id}': {sorted(devices_to_free - session_devices)}"
             )
             return None

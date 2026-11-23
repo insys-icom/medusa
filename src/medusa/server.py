@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from aiohttp import web
 
 from .dependency_resolver import resolve_dynamic_dependencies
+from .utils import LOGGER
 
 
 @dataclass(eq=False)
@@ -61,8 +62,8 @@ class DepLockManager:
         for device in session.devices:
             self.active_locks.pop(device, None)
 
-        print(
-            f"[CLEANUP] Released locks of session '{session.uuid}': {released_devices}."
+        LOGGER.info(
+            f"[SERVER-CLEANUP] Released locks of session '{session.uuid}': {released_devices}."
         )
 
     def _check_and_reclaim_expired_locks(self, timeout_seconds=30):
@@ -123,8 +124,8 @@ class DepLockManager:
         if close_session:
             del self.sessions[session_id]
 
-        print(
-            f"[FREE] Released devices {released_devices} from session '{session_id}'."
+        LOGGER.info(
+            f"[SERVER-FREE] Released devices {released_devices} from session '{session_id}'."
         )
 
         # 5. Return
@@ -142,7 +143,7 @@ class DepLockManager:
     ) -> dict:
         """Resolve dependencies and create a session if all devices are available"""
 
-        print(
+        LOGGER.info(
             f"[SERVER] Lock request received: session={session_id} static={sorted(static_deps)}, dynamic={dynamic_raw}"
         )
         session = None
@@ -152,6 +153,7 @@ class DepLockManager:
             session = self.sessions.get(session_id)
 
             if session is None:
+                LOGGER.error(f"[SERVER] Unknown session: {session_id}")
                 return {"status": "error", "message": "Unknown session."}
 
         # 2. Determine devices already held by this session
@@ -164,6 +166,7 @@ class DepLockManager:
         busy_static = static_deps & busy_deps
 
         if busy_static:
+            LOGGER.error(f"[SERVER] Static dependencies are busy: {sorted(busy_static)}")
             return {
                 "status": "unavailable",
                 "message": f"Static dependencies are busy: {sorted(busy_static)}",
@@ -179,6 +182,7 @@ class DepLockManager:
         assigned_dynamic = resolve_dynamic_dependencies(available_options)
 
         if assigned_dynamic is None:
+            LOGGER.error("[SERVER] No distinct set of devices satisfies all dynamic dependencies.")
             return {
                 "status": "unavailable",
                 "message": "No distinct set of devices satisfies all dynamic dependencies.",
@@ -268,19 +272,20 @@ class LockServer:
 
         # 5. Unavailable: Return immediately without acquiring any locks
         if lock_data["status"] == "unavailable":
-            print(
+            LOGGER.warning(
                 "[SERVER] Some Dependencies from lock-request are unavailable."
             )
             return web.json_response(lock_data, status=409)
 
         if lock_data["status"] == "error":
+            LOGGER.error("[SERVER] Error occurred while resolving and assigning dependencies.")
             return web.json_response(lock_data, status=404)
 
         # 6. Lock successfully acquired
         session = lock_data["session"]
         assigned_dynamic = lock_data["assigned_dynamic"]
 
-        print(
+        LOGGER.info(
             f"[SERVER] Lock granted for {sorted(session.devices)}. (Session: {session.uuid})"
         )
 
@@ -308,7 +313,7 @@ class LockServer:
             session = self.pool.sessions.get(session_id)
 
             if session is None:
-                print(f"[ALIVE] Unknown session: {session_id}")
+                LOGGER.warning(f"[SERVER-ALIVE] Unknown session: {session_id}")
                 return web.json_response(
                     {
                         "status": "error",
@@ -322,8 +327,8 @@ class LockServer:
 
         readable_time = self._format_datetime(last_alive)
 
-        print(
-            f"[ALIVE] Session '{session_id}' updated last_alive to {readable_time}"
+        LOGGER.debug(
+            f"[SERVER-ALIVE] Session '{session_id}' updated last_alive to {readable_time}"
         )
 
         return web.json_response(
@@ -351,9 +356,11 @@ class LockServer:
 
         # 3. Return result
         if result["status"] == "error":
+            LOGGER.error(f"[SERVER] Failed to release session '{session_id}': {result.get('message', '')}")
             return web.json_response(result, status=404)
 
         if result["status"] == "rejected":
+            LOGGER.error(f"[SERVER] Release request rejected for session '{session_id}': {result.get('message', '')}")
             return web.json_response(result, status=409)
 
         return web.json_response(result, status=200)
@@ -361,7 +368,7 @@ class LockServer:
     async def _handle_status(self, request):
         """Shows all active sessions and their locked devices"""
 
-        print("[SERVER] Global status dashboard request received.")
+        LOGGER.debug("[SERVER] Global status dashboard request received.")
 
         async with self.pool.server_mutex:
             self.pool._check_and_reclaim_expired_locks()
@@ -383,13 +390,15 @@ class LockServer:
 
         try:
             body = await request_data.json()
-        except Exception:
+        except Exception as exc:
+            LOGGER.error(f"[SERVER] Failed to parse JSON payload: {exc}")
             return web.json_response(
                 {"status": "error", "message": "Malformed JSON payload"},
                 status=400,
             )
 
         if not isinstance(body, dict):
+            LOGGER.error("[SERVER] Invalid request body: not a JSON object")
             return web.json_response(
                 {"status": "error", "message": "Invalid request body"},
                 status=400,
@@ -402,6 +411,7 @@ class LockServer:
         if session_id is not None and (
             not isinstance(session_id, str) or not session_id
         ):
+            LOGGER.error("[SERVER] Invalid session_id")
             return web.json_response(
                 {"status": "error", "message": "Invalid session_id"},
                 status=400,
@@ -410,6 +420,7 @@ class LockServer:
         if not isinstance(static_raw, list) or not isinstance(
             dynamic_raw, dict
         ):
+            LOGGER.error("[SERVER] Missing / invalid request fields")
             return web.json_response(
                 {
                     "status": "error",
@@ -429,6 +440,7 @@ class LockServer:
             )
             for name, options in dynamic_raw.items()
         ):
+            LOGGER.error("[SERVER] Invalid dependency names or options")
             return web.json_response(
                 {
                     "status": "error",
@@ -449,6 +461,7 @@ class LockServer:
         static_deps = set(static_raw)
 
         if len(static_deps) != len(static_raw):
+            LOGGER.error("[SERVER] Duplicate static dependencies")
             return web.json_response(
                 {
                     "status": "error",
@@ -463,6 +476,7 @@ class LockServer:
         }
 
         if not static_deps and not dynamic_options:
+            LOGGER.error("[SERVER] No dependencies supplied")
             return web.json_response(
                 {"status": "error", "message": "No dependencies supplied"},
                 status=400,
@@ -475,25 +489,28 @@ class LockServer:
 
         try:
             body = await request.json()
-        except Exception:
+        except Exception as exc:
+            LOGGER.error(f"[SERVER] Failed to parse JSON payload: {exc}")
             return web.json_response(
-                {"status": "error", "messaqe": "Malformed JSON payload."},
+                {"status": "error", "message": "Malformed JSON payload."},
                 status=400,
             )
 
         if not isinstance(body, dict):
+            LOGGER.error("[SERVER] Invalid request body: not a JSON object")
             return web.json_response(
-                {"status": "error", "messaqe": "Invalid request body."},
+                {"status": "error", "message": "Invalid request body."},
                 status=400,
             )
 
         session_id = body.get("session_id")
 
         if not isinstance(session_id, str) or not session_id:
+            LOGGER.error("[SERVER] Missing or invalid session_id")
             return web.json_response(
                 {
                     "status": "error",
-                    "messaqe": "Missing or invalid session_id.",
+                    "message": "Missing or invalid session_id.",
                 },
                 status=400,
             )
@@ -510,13 +527,15 @@ class LockServer:
 
         try:
             body = await request.json()
-        except Exception:
+        except Exception as exc:
+            LOGGER.error(f"[SERVER] Failed to parse JSON payload: {exc}")
             return web.json_response(
                 {"status": "error", "message": "Malformed JSON payload"},
                 status=400,
             )
 
         if not isinstance(body, dict):
+            LOGGER.error("[SERVER] Invalid request body: not a JSON object")
             return web.json_response(
                 {"status": "error", "message": "Invalid request body"},
                 status=400,
@@ -525,6 +544,7 @@ class LockServer:
         session_id = body.get("session_id")
 
         if not isinstance(session_id, str) or not session_id:
+            LOGGER.error("[SERVER] Missing or invalid session_id")
             return web.json_response(
                 {
                     "status": "error",
@@ -539,12 +559,14 @@ class LockServer:
             if not isinstance(devices, list) or not all(
                 isinstance(device, str) and device for device in devices
             ):
+                LOGGER.error("[SERVER] Invalid devices")
                 return web.json_response(
                     {"status": "error", "message": "Invalid devices"},
                     status=400,
                 )
 
             if len(devices) != len(set(devices)):
+                LOGGER.error("[SERVER] Duplicate devices")
                 return web.json_response(
                     {"status": "error", "message": "Duplicate devices"},
                     status=400,
@@ -591,8 +613,6 @@ def start_server(host: str = "127.0.0.1", port: str = "8081"):
         raise ValueError(
             f"Invalid port '{port}'. Port must be between 1 and 65535."
         )
-
-    print(f"Medusa lock-server auf http://{host}:{port_number} ...")
     LockServer(host, port_number).run()
 
 
