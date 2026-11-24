@@ -1,8 +1,10 @@
 import pytest
+import requests
 
-from medusa.cli import _parse_dependencies
+from medusa.cli import _keepalive, _parse_dependencies, _send_lock, free
 
 
+# Tests for _parse_dependencies
 @pytest.mark.parametrize(
     "dependencies, expected",
     [
@@ -21,7 +23,7 @@ from medusa.cli import _parse_dependencies
         ),
     ],
 )
-def test_parse_dependencies(
+def test_parse_dependencies_success(
     dependencies: list[str],
     expected: tuple[list[str], dict[str, list[str]]],
 ) -> None:
@@ -29,7 +31,7 @@ def test_parse_dependencies(
     assert output == expected  # Assert
 
 
-# Edge cases for parse_dependencies
+# Edge cases for _parse_dependencies
 @pytest.mark.parametrize(
     "dependencies, expected",
     [
@@ -59,3 +61,169 @@ def test_parse_dependencies_missing_equals_raises() -> None:
         _parse_dependencies(
             ["dynamic:$DUT"]
         )  # Missing "=" should raise ValueError
+
+
+# Tests for _send_lock
+def test_send_lock_success(monkeypatch, capsys):
+    # Arrange
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {
+                "session_id": "1234-5678-9014",
+                "devices": ["dev1"],
+                "deps_assigned": {"$DUT": "dev2"},
+            }
+
+    monkeypatch.setattr(
+        "medusa.cli.requests.post",
+        lambda *args, **kwargs: Response(),
+    )
+
+    # Act
+    result = _send_lock(["dev1"], {"$DUT": ["dev2"]}, "http://localhost:8080")
+
+    # Assert
+    assert result == "1234-5678-9014"
+    assert "Locked dependencies:" in capsys.readouterr().out
+
+
+def test_send_lock_rejected(monkeypatch):
+    # Arrange
+    class Response:
+        status_code = 409
+        text = "Dependencies busy"
+
+    monkeypatch.setattr(
+        "medusa.cli.requests.post",
+        lambda *args, **kwargs: Response(),
+    )
+
+    # Act
+    result = _send_lock(["dev1"], {}, "http://localhost:8080")
+
+    # Assert
+    assert result is None
+
+
+def test_send_lock_connection_error(monkeypatch):
+    # Arrange
+    def raise_connection_error(*args, **kwargs):
+        raise requests.ConnectionError("Server unavailable")
+
+    monkeypatch.setattr(
+        "medusa.cli.requests.post",
+        raise_connection_error,
+    )
+
+    # Act
+    result = _send_lock(["dev1"], {}, "http://localhost:8080")
+
+    # Assert
+    assert result is None
+
+
+# Tests for free
+def test_free_success(monkeypatch, capsys):
+    # Arrange
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"devices": ["dev1", "dev2"]}
+
+    def fake_post(url, json, timeout):
+        return Response()
+
+    # equivalent to:
+    # lambda *args, *kwargs: Response()
+
+    monkeypatch.setattr("medusa.cli.requests.post", fake_post)
+
+    # Act
+    result = free("1234-5678-9014", "http://localhost:8080")
+
+    # Assert
+    assert result is True
+    assert "Freed dependencies:" in capsys.readouterr().out
+
+
+def test_free_rejected(monkeypatch):
+    # Arrange
+    class Response:
+        status_code = 404
+        text = "Unknown session id"
+
+    monkeypatch.setattr(
+        "medusa.cli.requests.post",
+        lambda *args, **kwargs: Response(),
+    )
+
+    # Act
+    result = free("1234-5678", "http://localhost:8080")
+
+    # Assert
+    assert result is False
+
+
+def test_free_connection_error(monkeypatch):
+    # Arrange
+    def raise_connection_error(*args, **kwargs):
+        raise requests.ConnectionError("Server unavailable")
+
+    monkeypatch.setattr(
+        "medusa.cli.requests.post",
+        raise_connection_error,
+    )
+
+    # Act
+    result = free("1234-5678-9014", "http://localhost:8080")
+
+    # Assert
+    assert result is False
+
+
+# Tests for _keepalive
+def test_keepalive_connection_error(monkeypatch):
+    # Arrange
+    def raise_connection_error(*args, **kwargs):
+        raise requests.ConnectionError("Server unavailable")
+
+    monkeypatch.setattr(
+        "medusa.cli.requests.post",
+        raise_connection_error,
+    )
+    monkeypatch.setattr("medusa.cli.time.sleep", lambda seconds: None)
+
+    # Act
+    _keepalive("1234-5678-9014", "http://localhost:8080")
+
+    # Assert
+    # Functions returns after the connection error
+
+
+def test_keepalive_expired(monkeypatch):
+    # Arrange
+    responses = iter(
+        [
+            type("Response", (), {"status_code": 200})(),
+            type("Response", (), {"status_code": 404})(),
+        ]
+    )
+
+    calls = 0
+
+    def fake_post(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return next(responses)
+
+    monkeypatch.setattr("medusa.cli.requests.post", fake_post)
+    monkeypatch.setattr("medusa.cli.time.sleep", lambda seconds: None)
+
+    # Act
+    _keepalive("1234-5678-9014", "http://localhost:8080")
+
+    # Assert
+    assert calls == 2
