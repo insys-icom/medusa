@@ -64,7 +64,9 @@ def test_parse_dependencies_missing_equals_raises() -> None:
 
 
 # Tests for _send_lock
-def test_send_lock_success(monkeypatch, capsys):
+def test_send_lock_success(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     # Arrange
     class Response:
         status_code = 200
@@ -89,7 +91,7 @@ def test_send_lock_success(monkeypatch, capsys):
     assert "Locked dependencies:" in capsys.readouterr().out
 
 
-def test_send_lock_rejected(monkeypatch):
+def test_send_lock_rejected(monkeypatch: pytest.MonkeyPatch):
     # Arrange
     class Response:
         status_code = 409
@@ -107,7 +109,7 @@ def test_send_lock_rejected(monkeypatch):
     assert result is None
 
 
-def test_send_lock_connection_error(monkeypatch):
+def test_send_lock_connection_error(monkeypatch: pytest.MonkeyPatch):
     # Arrange
     def raise_connection_error(*args, **kwargs):
         raise requests.ConnectionError("Server unavailable")
@@ -125,7 +127,9 @@ def test_send_lock_connection_error(monkeypatch):
 
 
 # Tests for free
-def test_free_success(monkeypatch, capsys):
+def test_free_success(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+):
     # Arrange
     class Response:
         status_code = 200
@@ -137,7 +141,7 @@ def test_free_success(monkeypatch, capsys):
         return Response()
 
     # equivalent to:
-    # lambda *args, *kwargs: Response()
+    # lambda *args, **kwargs: Response()
 
     monkeypatch.setattr("medusa.cli.requests.post", fake_post)
 
@@ -149,7 +153,7 @@ def test_free_success(monkeypatch, capsys):
     assert "Freed dependencies:" in capsys.readouterr().out
 
 
-def test_free_rejected(monkeypatch):
+def test_free_rejected(monkeypatch: pytest.MonkeyPatch):
     # Arrange
     class Response:
         status_code = 404
@@ -167,7 +171,7 @@ def test_free_rejected(monkeypatch):
     assert result is False
 
 
-def test_free_connection_error(monkeypatch):
+def test_free_connection_error(monkeypatch: pytest.MonkeyPatch):
     # Arrange
     def raise_connection_error(*args, **kwargs):
         raise requests.ConnectionError("Server unavailable")
@@ -185,7 +189,7 @@ def test_free_connection_error(monkeypatch):
 
 
 # Tests for _keepalive
-def test_keepalive_connection_error(monkeypatch):
+def test_keepalive_connection_error(monkeypatch: pytest.MonkeyPatch):
     # Arrange
     def raise_connection_error(*args, **kwargs):
         raise requests.ConnectionError("Server unavailable")
@@ -203,7 +207,7 @@ def test_keepalive_connection_error(monkeypatch):
     # Functions returns after the connection error
 
 
-def test_keepalive_expired(monkeypatch):
+def test_keepalive_expired(monkeypatch: pytest.MonkeyPatch):
     # Arrange
     responses = iter(
         [
