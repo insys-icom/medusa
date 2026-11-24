@@ -34,7 +34,7 @@ class DepManager(ABC):
         """Keep active dependency locks alive if required."""
 
 
-# Local Dependency Manager for automatically medusa runs
+# Local Dependency Manager for automatic medusa runs
 class LocalDepManager(DepManager):
     def __init__(self, stage: "Stage") -> None:
         """Initialize the local dependency manager with the given stage."""
