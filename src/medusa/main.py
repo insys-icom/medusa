@@ -23,9 +23,9 @@ Usage:
   medusa run [-v] [-d OUTPUTDIR] [-f FILTER]... [-t TIMEOUT] [--server SERVER] [--] ROBOTARGS...
   medusa stats [-v] [-f FILTER]... [-s SELECTION] [--] ROBOTARGS...
   medusa server [-v] [--host HOST] [--port PORT]
-  medusa lock DEVICES... [--server SERVER]
-  medusa free UUID [--server SERVER]
-  medusa status [--server SERVER]
+  medusa lock [-v] DEVICES... [--server SERVER]
+  medusa free [-v] UUID [--server SERVER]
+  medusa status [-v] [--server SERVER]
   medusa help [filter|timeout|server]
   medusa version
 
