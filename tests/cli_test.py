@@ -9,7 +9,7 @@ class FakeResponse:
         self, status_code: int, data: dict | None = None, text: str = ""
     ) -> None:
         self.status_code = status_code
-        self._data = data or {}
+        self._data = data if data is not None else {}
         self.text = text
 
     def json(self) -> dict:
@@ -47,7 +47,7 @@ def test_parse_dependencies_success(
 @pytest.mark.parametrize(
     "dependencies, expected",
     [
-        # Only the first "=" seperates name and values
+        # Only the first "=" separates name and values
         (["dynamic:$DUT=a=b"], ([], {"$DUT": ["a=b"]})),
         # Empty value list yields one empty string
         (["dynamic:$DUT="], ([], {"$DUT": [""]})),
@@ -80,7 +80,7 @@ def test_send_lock_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # Arrange
-    request_data = {}
+    request_data: dict[str, object] = {}
 
     def fake_post(url: str, json: dict, timeout: int) -> FakeResponse:
         request_data["url"] = url
@@ -91,7 +91,7 @@ def test_send_lock_success(
             data={
                 "session_id": "1234-5678-9014",
                 "devices": ["dev1"],
-                "deps_assigned": {"$DUT": ["dev2", "dev3"]},
+                "deps_assigned": {"$DUT": "dev2"},
             },
         )
 
@@ -99,7 +99,7 @@ def test_send_lock_success(
 
     # Act
     result = _send_lock(
-        ["dev1"], {"$DUT": ["dev2", "dev3"]}, "http://localhost:8080"
+        ["dev1"], {"$DUT": ["dev3", "dev2"]}, "http://localhost:8080"
     )
 
     # Assert
@@ -146,12 +146,36 @@ def test_send_lock_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
     assert result is None
 
 
+@pytest.mark.parametrize(
+    "data", [{}, {"session_id": ""}, {"session_id": None}, {"session_id": 123}]
+)
+def test_send_lock_invalid_session_id(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+    data: dict,
+) -> None:
+    # Arrange
+    monkeypatch.setattr(
+        "medusa.cli.requests.post",
+        lambda *args, **kwargs: FakeResponse(200, data=data),
+    )
+
+    # Act
+    result = _send_lock(["dev1"], {}, "http://localhost:8080")
+
+    # Assert
+    assert result is None
+    assert capsys.readouterr().out == ""
+    assert "Server did not return a session ID" in caplog.text
+
+
 # Tests for free
 def test_free_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # Arrange
-    request_data = {}
+    request_data: dict[str, object] = {}
 
     def fake_post(url: str, json: dict, timeout: int) -> FakeResponse:
         request_data["url"] = url
@@ -218,6 +242,8 @@ def test_keepalive_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
     def raise_connection_error(*args: object, **kwargs: object) -> None:
         nonlocal calls
         calls += 1
+        if calls > 1:
+            raise AssertionError("_keepalive did not stop after error")
         raise requests.ConnectionError("Server unavailable")
 
     monkeypatch.setattr(
@@ -231,6 +257,23 @@ def test_keepalive_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Assert
     assert calls == 1
+
+
+def test_keepalive_rejected(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    # Arrange
+    monkeypatch.setattr(
+        "medusa.cli.requests.post",
+        lambda *args, **kwargs: FakeResponse(500, text="Internal error"),
+    )
+    monkeypatch.setattr("medusa.cli.time.sleep", lambda seconds: None)
+
+    # Act
+    _keepalive("1234-5678-9014", "http://localhost:8080")
+
+    # Assert
+    assert "Keepalive rejected: 500 Internal error" in caplog.text
 
 
 def test_keepalive_expired(monkeypatch: pytest.MonkeyPatch) -> None:
