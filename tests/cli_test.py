@@ -4,6 +4,18 @@ import requests
 from medusa.cli import _keepalive, _parse_dependencies, _send_lock, free
 
 
+class FakeResponse:
+    def __init__(
+        self, status_code: int, data: dict | None = None, text: str = ""
+    ) -> None:
+        self.status_code = status_code
+        self._data = data or {}
+        self.text = text
+
+    def json(self) -> dict:
+        return self._data
+
+
 # Tests for _parse_dependencies
 @pytest.mark.parametrize(
     "dependencies, expected",
@@ -68,38 +80,46 @@ def test_send_lock_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     # Arrange
-    class Response:
-        status_code = 200
+    request_data = {}
 
-        def json(self):
-            return {
+    def fake_post(url: str, json: dict, timeout: int) -> FakeResponse:
+        request_data["url"] = url
+        request_data["json"] = json
+        request_data["timeout"] = timeout
+        return FakeResponse(
+            200,
+            data={
                 "session_id": "1234-5678-9014",
                 "devices": ["dev1"],
-                "deps_assigned": {"$DUT": "dev2"},
-            }
+                "deps_assigned": {"$DUT": ["dev2", "dev3"]},
+            },
+        )
 
-    monkeypatch.setattr(
-        "medusa.cli.requests.post",
-        lambda *args, **kwargs: Response(),
-    )
+    monkeypatch.setattr("medusa.cli.requests.post", fake_post)
 
     # Act
-    result = _send_lock(["dev1"], {"$DUT": ["dev2"]}, "http://localhost:8080")
+    result = _send_lock(
+        ["dev1"], {"$DUT": ["dev2", "dev3"]}, "http://localhost:8080"
+    )
 
     # Assert
     assert result == "1234-5678-9014"
+    assert request_data == {
+        "url": "http://localhost:8080/lock",
+        "json": {
+            "deps_static": ["dev1"],
+            "deps_dynamic": {"$DUT": ["dev2", "dev3"]},
+        },
+        "timeout": 5,
+    }
     assert "Locked dependencies:" in capsys.readouterr().out
 
 
-def test_send_lock_rejected(monkeypatch: pytest.MonkeyPatch):
+def test_send_lock_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     # Arrange
-    class Response:
-        status_code = 409
-        text = "Dependencies busy"
-
     monkeypatch.setattr(
         "medusa.cli.requests.post",
-        lambda *args, **kwargs: Response(),
+        lambda *args, **kwargs: FakeResponse(409, text="Dependencies busy"),
     )
 
     # Act
@@ -109,9 +129,9 @@ def test_send_lock_rejected(monkeypatch: pytest.MonkeyPatch):
     assert result is None
 
 
-def test_send_lock_connection_error(monkeypatch: pytest.MonkeyPatch):
+def test_send_lock_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
     # Arrange
-    def raise_connection_error(*args, **kwargs):
+    def raise_connection_error(*args: object, **kwargs: object) -> None:
         raise requests.ConnectionError("Server unavailable")
 
     monkeypatch.setattr(
@@ -129,19 +149,18 @@ def test_send_lock_connection_error(monkeypatch: pytest.MonkeyPatch):
 # Tests for free
 def test_free_success(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-):
+) -> None:
     # Arrange
-    class Response:
-        status_code = 200
+    request_data = {}
 
-        def json(self):
-            return {"devices": ["dev1", "dev2"]}
-
-    def fake_post(url, json, timeout):
-        return Response()
-
-    # equivalent to:
-    # lambda *args, **kwargs: Response()
+    def fake_post(url: str, json: dict, timeout: int) -> FakeResponse:
+        request_data["url"] = url
+        request_data["json"] = json
+        request_data["timeout"] = timeout
+        return FakeResponse(
+            200,
+            data={"session_id": "1234-5678-9014", "devices": ["dev1", "dev2"]},
+        )
 
     monkeypatch.setattr("medusa.cli.requests.post", fake_post)
 
@@ -150,18 +169,21 @@ def test_free_success(
 
     # Assert
     assert result is True
+    assert request_data == {
+        "url": "http://localhost:8080/free",
+        "json": {
+            "session_id": "1234-5678-9014",
+        },
+        "timeout": 5,
+    }
     assert "Freed dependencies:" in capsys.readouterr().out
 
 
-def test_free_rejected(monkeypatch: pytest.MonkeyPatch):
+def test_free_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
     # Arrange
-    class Response:
-        status_code = 404
-        text = "Unknown session id"
-
     monkeypatch.setattr(
         "medusa.cli.requests.post",
-        lambda *args, **kwargs: Response(),
+        lambda *args, **kwargs: FakeResponse(404, text="Unknown session id"),
     )
 
     # Act
@@ -171,9 +193,9 @@ def test_free_rejected(monkeypatch: pytest.MonkeyPatch):
     assert result is False
 
 
-def test_free_connection_error(monkeypatch: pytest.MonkeyPatch):
+def test_free_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
     # Arrange
-    def raise_connection_error(*args, **kwargs):
+    def raise_connection_error(*args: object, **kwargs: object) -> None:
         raise requests.ConnectionError("Server unavailable")
 
     monkeypatch.setattr(
@@ -189,9 +211,13 @@ def test_free_connection_error(monkeypatch: pytest.MonkeyPatch):
 
 
 # Tests for _keepalive
-def test_keepalive_connection_error(monkeypatch: pytest.MonkeyPatch):
+def test_keepalive_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
     # Arrange
-    def raise_connection_error(*args, **kwargs):
+    calls = 0
+
+    def raise_connection_error(*args: object, **kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
         raise requests.ConnectionError("Server unavailable")
 
     monkeypatch.setattr(
@@ -204,21 +230,16 @@ def test_keepalive_connection_error(monkeypatch: pytest.MonkeyPatch):
     _keepalive("1234-5678-9014", "http://localhost:8080")
 
     # Assert
-    # Functions returns after the connection error
+    assert calls == 1
 
 
-def test_keepalive_expired(monkeypatch: pytest.MonkeyPatch):
+def test_keepalive_expired(monkeypatch: pytest.MonkeyPatch) -> None:
     # Arrange
-    responses = iter(
-        [
-            type("Response", (), {"status_code": 200})(),
-            type("Response", (), {"status_code": 404})(),
-        ]
-    )
+    responses = iter([FakeResponse(200), FakeResponse(404)])
 
     calls = 0
 
-    def fake_post(*args, **kwargs):
+    def fake_post(*args: object, **kwargs: object) -> FakeResponse:
         nonlocal calls
         calls += 1
         return next(responses)
