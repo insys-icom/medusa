@@ -191,6 +191,8 @@ def main() -> None:
 
         if arguments["--verbose"]:
             log_level = logging.DEBUG
+        elif arguments["server"]:
+            log_level = logging.INFO
         else:
             log_level = logging.WARNING
 
