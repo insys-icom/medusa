@@ -77,7 +77,6 @@ def lock_dependencies(dependencies: list[str], server_url: str) -> None:
     if not session_id:
         return
 
-    LOGGER.info(f"[CLI] Session ID: {session_id}")
     print(f"Session ID: {session_id}")
 
     try:
@@ -87,7 +86,6 @@ def lock_dependencies(dependencies: list[str], server_url: str) -> None:
 
         if free(session_id, server_url):
             LOGGER.info(f"[CLI] Session '{session_id}' released.")
-            print(f"Session '{session_id}' released.")
         else:
             LOGGER.warning(
                 f"[CLI] Could not release session '{session_id}'. The server will reclaim it after timeout."
@@ -214,5 +212,4 @@ def free(session_id: str, server_url: str) -> bool:
 
     result = response.json()
     LOGGER.info(f"[CLI] Freed dependencies: {result.get('devices', [])}")
-    print(f"Freed dependencies: {result.get('devices', [])}")
     return True
