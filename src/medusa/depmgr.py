@@ -178,7 +178,7 @@ class ServerDepManager(DepManager):
         session_id, session_devices = self._get_session_data(suite)
 
         if session_id is None:
-            LOGGER.warning(
+            LOGGER.error(
                 f"[SERVER-DEPMGR] No active sessions found for '{suite.full_name}'."
             )
             return
